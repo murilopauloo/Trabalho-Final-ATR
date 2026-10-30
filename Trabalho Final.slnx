@@ -3,5 +3,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Project Path="ExibicaoProcesso/ExibicaoProcesso.vcxproj" />
+  <Project Path="GestaoProducao/GestaoProducao.vcxproj" />
   <Project Path="Trabalho Final/Trabalho Final.vcxproj" />
 </Solution>
