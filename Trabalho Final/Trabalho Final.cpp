@@ -7,6 +7,53 @@
 
 using namespace std;
 
+const int TAM_LISTA_1 = 5;
+string listaCircular1[TAM_LISTA_1];
+int pLivre1 = 0;   //Apontador de insercao (Produtores)
+int pOcupado1 = 0; //Apontador de retirada (Consumidor)
+
+HANDLE hMutexLista1 = NULL; //Protege o acesso aos apontadores e ao array
+HANDLE hSemLivres1 = NULL; //Conta espacos livres (inicia em 100)
+HANDLE hSemOcupadas1 = NULL; //Conta mensagens disponiveis (inicia em 0)
+HANDLE hMutexConsole = NULL; //Protege o uso do cout no console principal
+
+
+//FUNÇÃO AUXILIAR DE DEPOSITO DE MENSAGEM
+bool DepositarNaLista1(const string& mensagem, const string& nomeTarefa, HANDLE eventoEncerramento) {
+    //Verifica sem bloquear (timeout = 0) se ha espaco livre
+    DWORD resultado = WaitForSingleObject(hSemLivres1, 0);
+
+    if (resultado == WAIT_TIMEOUT) {
+
+        //O semaforo estava em 0: a lista esta cheia
+        WaitForSingleObject(hMutexConsole, INFINITE);
+        cout << "[AVISO] Lista circular 1 cheia! Tarefa " << nomeTarefa
+            << " bloqueada aguardando posicao livre..." << endl;
+        ReleaseMutex(hMutexConsole);
+
+        //Bloqueia esperando OU abrir espaco na lista OU o comando ESC de encerramento
+        HANDLE eventosEspera[2] = { eventoEncerramento, hSemLivres1 };
+        DWORD causaDesbloqueio = WaitForMultipleObjects(2, eventosEspera, FALSE, INFINITE);
+
+        //Se desbloqueou porque o indice 0 (eventoEncerramento) foi acionado, aborta
+        if (causaDesbloqueio == WAIT_OBJECT_0) {
+            return false;
+        }
+    }
+
+    //Temos 1 vaga garantida pelo semaforo. Travamos o Mutex para escrever na memoria:
+    WaitForSingleObject(hMutexLista1, INFINITE);
+
+    listaCircular1[pLivre1] = mensagem;
+    pLivre1 = (pLivre1 + 1) % TAM_LISTA_1;
+
+    ReleaseMutex(hMutexLista1);
+
+    //Sinaliza para a tarefa de Retirada que ha 1 nova mensagem ocupada
+    ReleaseSemaphore(hSemOcupadas1, 1, nullptr);
+    return true;
+}
+
 // ============================================================
 // THREADS
 // ============================================================
@@ -48,12 +95,30 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
-    while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
+    while (true) {
 
-        // TODO: Retirar mensagens da lista circular
-        // TODO: Exibir mensagens no console principal
+        HANDLE eventosEspera[2] = { eventoEncerramento, hSemOcupadas1 };
+        DWORD status = WaitForMultipleObjects(2, eventosEspera, FALSE, INFINITE);
 
-        Sleep(100);
+        if (status == WAIT_OBJECT_0) {
+            break; // Evento de encerramento (ESC) acionado! Sai do while.
+        }
+
+        //Se chegou aqui, hSemOcupadas1 foi decrementado (ha mensagem para ler)
+        WaitForSingleObject(hMutexLista1, INFINITE);
+
+        string msgRetirada = listaCircular1[pOcupado1];
+        pOcupado1 = (pOcupado1 + 1) % TAM_LISTA_1;
+
+        ReleaseMutex(hMutexLista1);
+
+        //Libera 1 posicao livre no semaforo para os produtores (Supervisorio e PCP)
+        ReleaseSemaphore(hSemLivres1, 1, nullptr);
+
+        //Exibe na console principal (requisito da Etapa 1)
+        WaitForSingleObject(hMutexConsole, INFINITE);
+        cout << "[RETIRADA] " << msgRetirada << endl;
+        ReleaseMutex(hMutexConsole);
     }
 
     return 0;
@@ -91,6 +156,17 @@ int main() {
 
     if (eventoEncerramento == NULL) {
         cout << "Erro ao criar evento de encerramento." << endl;
+        return 1;
+    }
+
+    // Criacao dos objetos de sincronizacao da Lista Circular 1
+    hMutexLista1 = CreateMutexW(nullptr, FALSE, nullptr);
+    hSemLivres1 = CreateSemaphoreW(nullptr, TAM_LISTA_1, TAM_LISTA_1, nullptr);
+    hSemOcupadas1 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_1, nullptr);
+    hMutexConsole = CreateMutexW(nullptr, FALSE, nullptr);
+
+    if (!hMutexLista1 || !hSemLivres1 || !hSemOcupadas1 || !hMutexConsole) {
+        cout << "Erro ao criar objetos de sincronizacao da lista." << endl;
         return 1;
     }
 
@@ -276,6 +352,10 @@ int main() {
     // --------------------------------------------------------
 
     CloseHandle(eventoEncerramento);
+    CloseHandle(hMutexLista1);
+    CloseHandle(hSemLivres1);
+    CloseHandle(hSemOcupadas1);
+    CloseHandle(hMutexConsole);
 
     cout << "\nProcesso principal encerrado." << endl;
 
