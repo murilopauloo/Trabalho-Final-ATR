@@ -4,10 +4,13 @@
 #include <iostream>
 #include <string>
 #include <conio.h>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 
 using namespace std;
 
-const int TAM_LISTA_1 = 5;
+const int TAM_LISTA_1 = 100;
 string listaCircular1[TAM_LISTA_1];
 int pLivre1 = 0;   //Apontador de insercao (Produtores)
 int pOcupado1 = 0; //Apontador de retirada (Consumidor)
@@ -17,6 +20,57 @@ HANDLE hSemLivres1 = NULL; //Conta espacos livres (inicia em 100)
 HANDLE hSemOcupadas1 = NULL; //Conta mensagens disponiveis (inicia em 0)
 HANDLE hMutexConsole = NULL; //Protege o uso do cout no console principal
 
+
+HANDLE hEventoBloqSupervisorio = NULL;
+HANDLE hEventoBloqPCP = NULL;
+HANDLE hEventoBloqRetirada = NULL;
+HANDLE hEventoBloqExibicao = NULL;
+HANDLE hEventoBloqGestao = NULL;
+
+// Gera mensagem de 50 caracteres do Supervisorio
+// Formato: "1/NNNNN/NNN.N/NNN.N/NNN.N/NNN.N/NNN.N/HH:MM:SS.NNN"[cite: 2]
+string GerarMensagemSupervisorio(int nseq) {
+    // Sorteia valores de 0.0 a 999.9 dividindo um inteiro por 10.0
+    double volume = (rand() % 10000) / 10.0;
+    double pressao = (rand() % 10000) / 10.0;
+    double tzona1 = (rand() % 10000) / 10.0;
+    double tzona2 = (rand() % 10000) / 10.0;
+    double tzona3 = (rand() % 10000) / 10.0;
+
+    // Pega a hora atual do Windows com milissegundos[cite: 2]
+    SYSTEMTIME horaAtual;
+    GetLocalTime(&horaAtual);
+
+    // Monta o texto formatado com zeros a esquerda
+    char texto[51];
+    sprintf_s(texto, sizeof(texto),
+        "1/%05d/%05.1f/%05.1f/%05.1f/%05.1f/%05.1f/%02d:%02d:%02d.%03d",
+        nseq, volume, pressao, tzona1, tzona2, tzona3,
+        horaAtual.wHour, horaAtual.wMinute, horaAtual.wSecond, horaAtual.wMilliseconds
+    );
+
+    return string(texto);
+}
+
+// Gera mensagem de 31 caracteres do PCP
+// Formato: "2/NNNNN/HH:MM:SS/NNNNN/AAAAAAAA"[cite: 3]
+string GerarMensagemPCP(int nseq) {
+    int hora = rand() % 24;    // 0 a 23
+    int minuto = rand() % 60;    // 0 a 59
+    int segundo = rand() % 60;    // 0 a 59
+    int duracao = rand() % 10000; // 0 a 9999 minutos
+
+    // Sorteia um numero para a OP (ex: "OP-01234" tem 8 caracteres)[cite: 3]
+    int numeroOP = rand() % 100000;
+
+    char texto[32];
+    sprintf_s(texto, sizeof(texto),
+        "2/%05d/%02d:%02d:%02d/%05d/OP-%05d",
+        nseq, hora, minuto, segundo, duracao, numeroOP
+    );
+
+    return string(texto);
+}
 
 //FUNÇÃO AUXILIAR DE DEPOSITO DE MENSAGEM
 bool DepositarNaLista1(const string& mensagem, const string& nomeTarefa, HANDLE eventoEncerramento) {
@@ -60,14 +114,34 @@ bool DepositarNaLista1(const string& mensagem, const string& nomeTarefa, HANDLE 
 
 // Thread de leitura do Supervisorio
 DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
-
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
+    // Inicializa os numeros aleatorios para esta thread
+    srand((unsigned int)time(NULL) + 1);
+
+    int nseq = 1; // Comeca em 1
+
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
+        // 1. Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
+        //if (!AguardarDesbloqueioOuTermino(3, eventoEncerramento)) {
+        //    break;
+        //}
 
-        // TODO: Gerar mensagens do Supervisorio
-        // TODO: Inserir mensagens na lista circular
+        // 2. Gera a mensagem formatada com 50 caracteres
+        string msg = GerarMensagemSupervisorio(nseq);
 
+        // 3. Incrementa o NSEQ (volta a 0 apos atingir 99999)
+        nseq++;
+        if (nseq > 99999) {
+            nseq = 0;
+        }
+
+        // 4. Deposita a mensagem na Lista Circular 1
+        if (!DepositarNaLista1(msg, "Leitura do Supervisorio", eventoEncerramento)) {
+            break; // Sai se o utilizador premiu ESC enquanto a lista estava cheia
+        }
+
+        // 5. Temporizacao provisoria da Etapa 1 (1000 ms)
         Sleep(1000);
     }
 
@@ -76,14 +150,34 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
 
 // Thread de leitura do PCP
 DWORD WINAPI LeituraPCP(LPVOID parametro) {
-
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
+    // Inicializa os numeros aleatorios (soma +2 para nao gerar valores iguais ao Supervisorio)
+    srand((unsigned int)time(NULL) + 2);
+
+    int nseq = 1; // Comeca em 1
+
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
+        // 1. Verifica se a tecla 'm' bloqueou a tarefa ou se 'ESC' foi premido
+        //if (!AguardarDesbloqueioOuTermino(hEventoBloqPCP, eventoEncerramento)) {
+        //    break;
+        //}
 
-        // TODO: Gerar mensagens do PCP
-        // TODO: Inserir mensagens na lista circular
+        // 2. Gera a mensagem formatada com 31 caracteres
+        string msg = GerarMensagemPCP(nseq);
 
+        // 3. Incrementa o NSEQ (volta a 0 apos atingir 99999)
+        nseq++;
+        if (nseq > 99999) {
+            nseq = 0;
+        }
+
+        // 4. Deposita a mensagem na Lista Circular 1
+        if (!DepositarNaLista1(msg, "Leitura do PCP", eventoEncerramento)) {
+            break; // Sai se o utilizador premiu ESC enquanto a lista estava cheia
+        }
+
+        // 5. Temporizacao provisoria da Etapa 1 (1000 ms)
         Sleep(1000);
     }
 
@@ -156,6 +250,18 @@ int main() {
 
     if (eventoEncerramento == NULL) {
         cout << "Erro ao criar evento de encerramento." << endl;
+        return 1;
+    }
+    // ADICIONE ESTE BLOCO AQUI (Antes do Passo 3 - CreateProcessW):
+    hEventoBloqSupervisorio = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    hEventoBloqPCP = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    hEventoBloqRetirada = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    hEventoBloqExibicao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\ELT127_BloqExibicao");
+    hEventoBloqGestao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\ELT127_BloqGestao");
+
+    if (!eventoEncerramento || !hEventoBloqSupervisorio || !hEventoBloqPCP ||
+        !hEventoBloqRetirada || !hEventoBloqExibicao || !hEventoBloqGestao) {
+        cout << "Erro ao criar eventos de sincronizacao." << endl;
         return 1;
     }
 
@@ -352,6 +458,12 @@ int main() {
     // --------------------------------------------------------
 
     CloseHandle(eventoEncerramento);
+    CloseHandle(hEventoBloqSupervisorio);
+    CloseHandle(hEventoBloqPCP);
+    CloseHandle(hEventoBloqRetirada);
+    CloseHandle(hEventoBloqExibicao);
+    CloseHandle(hEventoBloqGestao);
+
     CloseHandle(hMutexLista1);
     CloseHandle(hSemLivres1);
     CloseHandle(hSemOcupadas1);
