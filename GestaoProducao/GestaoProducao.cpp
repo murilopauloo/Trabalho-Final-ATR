@@ -12,19 +12,18 @@ int main() {
 
     if (!hEventoEncerramento || !hEventoBloqueio) {
         cout << "Erro ao abrir eventos de sincronizacao: " << GetLastError() << endl;
-        cout << "Certifique-se de iniciar a aplicacao pelo Processo Principal." << endl;
         Sleep(5000);
         return 1;
     }
 
-    cout << "================================================" << endl;
+    cout << "_________________________________________________" << endl;
     cout << "        TAREFA DE GESTAO DA PRODUCAO            " << endl;
-    cout << "================================================" << endl;
-    cout << "[ESTADO] Tarefa iniciada: DESBLOQUEADA" << endl;
+    cout << "_________________________________________________" << endl;
+    cout << "Tarefa iniciada: DESBLOQUEADA" << endl;
 
     bool estavaBloqueado = false;
 
-    //Laco principal, monitora encerramento (ESC) e mudancas de estado (tecla 'g')
+    //Laço principal, monitora encerramento (ESC) e mudancas de estado (tecla 'g')
     while (WaitForSingleObject(hEventoEncerramento, 100) == WAIT_TIMEOUT) {
 
         DWORD status = WaitForSingleObject(hEventoBloqueio, 0);
@@ -34,10 +33,10 @@ int main() {
         if (bloqueadoAgora != estavaBloqueado) {
             estavaBloqueado = bloqueadoAgora;
             if (estavaBloqueado) {
-                cout << "[ESTADO] Tarefa de Gestao da Producao: BLOQUEADA (tecla 'g')" << endl;
+                cout << "Tarefa de Gestao da Producao: BLOQUEADA" << endl;
             }
             else {
-                cout << "[ESTADO] Tarefa de Gestao da Producao: DESBLOQUEADA (tecla 'g')" << endl;
+                cout << " Tarefa de Gestao da Producao: DESBLOQUEADA" << endl;
             }
         }
     }

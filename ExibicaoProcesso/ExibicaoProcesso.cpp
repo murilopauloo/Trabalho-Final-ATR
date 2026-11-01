@@ -12,39 +12,37 @@ int main() {
 
     if (!hEventoEncerramento || !hEventoBloqueio) {
         cout << "Erro ao abrir eventos de sincronizacao: " << GetLastError() << endl;
-        cout << "Certifique-se de iniciar a aplicacao pelo Processo Principal." << endl;
         Sleep(5000);
         return 1;
     }
 
-    cout << "================================================" << endl;
-    cout << "   TAREFA DE EXIBICAO DE DADOS DE PROCESSO      " << endl;
-    cout << "================================================" << endl;
-    cout << "[ESTADO] Tarefa iniciada: DESBLOQUEADA" << endl;
+    cout << "_________________________________________________" << endl;
+    cout << "   TAREFA DE EXIBICAO DE PROCESSO      " << endl;
+    cout << "_________________________________________________" << endl;
+    cout << "Tarefa iniciada: DESBLOQUEADA" << endl;
 
     bool estavaBloqueado = false;
 
-    //Laco principal: monitora encerramento (ESC) e mudancas de estado (tecla 'p')
+    //Laçoo principal: monitora encerramento (ESC) e mudanças de estado (tecla 'p')
     while (WaitForSingleObject(hEventoEncerramento, 100) == WAIT_TIMEOUT) {
 
-        //Verifica se o evento de bloqueio esta sinalizado (timeout = 0)
-        //Sinalizado (WAIT_OBJECT_0) = Desbloqueado | Nao-sinalizado (WAIT_TIMEOUT) = Bloqueado
+        //Verifica se o evento de bloqueio esta sinalizado
         DWORD status = WaitForSingleObject(hEventoBloqueio, 0);
         bool bloqueadoAgora = (status == WAIT_TIMEOUT);
 
-        //Imprime apenas quando o estado mudar (quando o usuario apertar 'p')
+        //Imprime apenas quando o estado mudar (apertar 'p')
         if (bloqueadoAgora != estavaBloqueado) {
             estavaBloqueado = bloqueadoAgora;
             if (estavaBloqueado) {
-                cout << "[ESTADO] Tarefa de Exibicao de Processo: BLOQUEADA (tecla 'p')" << endl;
+                cout << "Tarefa de Exibicao de Processo: BLOQUEADA" << endl;
             }
             else {
-                cout << "[ESTADO] Tarefa de Exibicao de Processo: DESBLOQUEADA (tecla 'p')" << endl;
+                cout << "Tarefa de Exibicao de Processo: DESBLOQUEADA" << endl;
             }
         }
     }
 
-    cout << "\nEncerrando Tarefa de Exibicao de Dados de Processo..." << endl;
+    cout << "\nEncerrando Tarefa de Exibicao de Processo..." << endl;
 
     CloseHandle(hEventoBloqueio);
     CloseHandle(hEventoEncerramento);

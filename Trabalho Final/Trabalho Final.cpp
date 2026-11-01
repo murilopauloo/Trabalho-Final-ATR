@@ -1,4 +1,3 @@
-// main.cpp - Processo Principal
 
 #include <windows.h>
 #include <iostream>
@@ -12,11 +11,11 @@ using namespace std;
 
 const int TAM_LISTA_1 = 100;
 string listaCircular1[TAM_LISTA_1];
-// Indices compartilhados, manipulados somente com hMutexLista1 adquirido.
-int pLivre1 = 0;       // Proxima posicao a reservar.
-int pPublicacao1 = 0;  // Proxima posicao a disponibilizar para retirada.
+// Indices compartilhados, manipulados somente com hMutexLista1 adquirido
+int pLivre1 = 0;// Proxima posicao a reservar
+int pPublicacao1 = 0;// Proxima posicao a disponibilizar para retirada
 
-// true: escrita concluida, mas ainda nao publicada no semaforo.
+// true: escrita concluida, mas ainda nao publicada no semaforo
 bool prontaParaPublicar1[TAM_LISTA_1] = {};
 
 HANDLE hMutexLista1 = NULL; //Protege o acesso aos apontadores e ao array
@@ -31,24 +30,24 @@ HANDLE hEventoBloqRetirada = NULL;
 HANDLE hEventoBloqExibicao = NULL;
 HANDLE hEventoBloqGestao = NULL;
 
-// Aguarda permissao para executar ou encerramento, com prioridade para encerrar.
+// Aguarda permissao para executar ou encerramento, com prioridade para encerrar
 bool AguardarDesbloqueioOuTermino(HANDLE hEventoBloqueio, HANDLE hEventoEncerramento) {
     HANDLE eventos[] = { hEventoEncerramento, hEventoBloqueio };
     DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
 
     if (resultado == WAIT_OBJECT_0) {
-        return false; // Encerramento solicitado, mesmo se a tarefa estiver bloqueada.
+        return false; //Encerramento solicitado, mesmo se a tarefa estiver bloqueada
     }
 
     if (resultado == WAIT_OBJECT_0 + 1) {
-        return true; // Evento de bloqueio sinalizado: tarefa liberada.
+        return true; //Evento de bloqueio sinalizado: tarefa liberada
     }
 
-    return false; // Falha na espera: interrompe a tarefa.
+    return false; //Falha na espera: interrompe a tarefa
 }
 
 // Gera mensagem de 50 caracteres do Supervisorio
-// Formato: "1/NNNNN/NNN.N/NNN.N/NNN.N/NNN.N/NNN.N/HH:MM:SS.NNN"[cite: 2]
+// Formato: "1/NNNNN/NNN.N/NNN.N/NNN.N/NNN.N/NNN.N/HH:MM:SS.NNN"
 string GerarMensagemSupervisorio(int nseq) {
     // Sorteia valores de 0.0 a 999.9 dividindo um inteiro por 10.0
     double volume = (rand() % 10000) / 10.0;
@@ -57,11 +56,11 @@ string GerarMensagemSupervisorio(int nseq) {
     double tzona2 = (rand() % 10000) / 10.0;
     double tzona3 = (rand() % 10000) / 10.0;
 
-    // Pega a hora atual do Windows com milissegundos[cite: 2]
+    //Pega a hora atual do Windows com milissegundos
     SYSTEMTIME horaAtual;
     GetLocalTime(&horaAtual);
 
-    // Monta o texto formatado com zeros a esquerda
+    //Monta o texto formatado com zeros a esquerda
     char texto[51];
     sprintf_s(texto, sizeof(texto),
         "1/%05d/%05.1f/%05.1f/%05.1f/%05.1f/%05.1f/%02d:%02d:%02d.%03d",
@@ -73,14 +72,14 @@ string GerarMensagemSupervisorio(int nseq) {
 }
 
 // Gera mensagem de 31 caracteres do PCP
-// Formato: "2/NNNNN/HH:MM:SS/NNNNN/AAAAAAAA"[cite: 3]
+// Formato: "2/NNNNN/HH:MM:SS/NNNNN/AAAAAAAA"
 string GerarMensagemPCP(int nseq) {
-    int hora = rand() % 24;    // 0 a 23
-    int minuto = rand() % 60;    // 0 a 59
-    int segundo = rand() % 60;    // 0 a 59
-    int duracao = rand() % 10000; // 0 a 9999 minutos
+    int hora = rand() % 24;//0 a 23
+    int minuto = rand() % 60;//0 a 59
+    int segundo = rand() % 60;//0 a 59
+    int duracao = rand() % 10000;// 0 a 9999 minutos
 
-    // Sorteia um numero para a OP (ex: "OP-01234" tem 8 caracteres)[cite: 3]
+    // Sorteia um numero para a OP
     int numeroOP = rand() % 100000;
 
     char texto[32];
@@ -92,7 +91,7 @@ string GerarMensagemPCP(int nseq) {
     return string(texto);
 }
 
-//FUNÇÃO AUXILIAR DE DEPOSITO DE MENSAGEM
+//Função auxiliar de deposito de mensages
 bool DepositarNaLista1(
     const string& mensagem,
     const string& nomeTarefa,
@@ -111,22 +110,22 @@ bool DepositarNaLista1(
         HANDLE eventos[] = { eventoEncerramento, hSemLivres1 };
         resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
 
-        // Continua somente se uma vaga foi adquirida.
+        //Continua somente se uma vaga foi adqurida
         if (resultado != WAIT_OBJECT_0 + 1) {
             return false;
         }
     }
     else if (resultado != WAIT_OBJECT_0) {
-        return false; // Falha ao aguardar o semaforo.
+        return false; //Falha ao aguardar o semaforo
     }
 
-    // A tarefa pode ter sido bloqueada enquanto aguardava uma vaga.
+    //A tarefa pode ter sido bloqueada enquanto aguardava uma vaga
     if (!AguardarDesbloqueioOuTermino(hEventoBloqueio, eventoEncerramento)) {
         ReleaseSemaphore(hSemLivres1, 1, nullptr);
         return false;
     }
 
-    // Reserva uma posicao exclusiva para esta tarefa.
+    //Reserva uma posicao exclusiva para esta tarefa
     WaitForSingleObject(hMutexLista1, INFINITE);
 
     apontadorIndividual = pLivre1;
@@ -134,17 +133,16 @@ bool DepositarNaLista1(
 
     ReleaseMutex(hMutexLista1);
 
-    // Cada produtor escreve na posicao que reservou.
+    //Cada produtor escreve na posicao que reservou
     listaCircular1[apontadorIndividual] = mensagem;
 
-    // Apos reservar, conclui a escrita e a publicacao sem novas esperas
-    // de bloqueio, evitando deixar uma lacuna na fila.
+    //Apos reservar, conclui a escrita e a publicacao sem novas esperas de bloqueio, evitando deixar uma lacuna na fila
     WaitForSingleObject(hMutexLista1, INFINITE);
 
     prontaParaPublicar1[apontadorIndividual] = true;
     int quantidadePublicada = 0;
 
-    // Disponibiliza somente mensagens consecutivas ja prontas.
+    // Disponibiliza somente mensagens consecutivas ja prontas
     while (prontaParaPublicar1[pPublicacao1]) {
         prontaParaPublicar1[pPublicacao1] = false;
         pPublicacao1 = (pPublicacao1 + 1) % TAM_LISTA_1;
@@ -167,34 +165,34 @@ bool DepositarNaLista1(
 DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
-    // Inicializa os numeros aleatorios para esta thread
+    //Inicializa os numeros aleatorios para esta thread
     srand((unsigned int)time(NULL) + 1);
 
     int nseq = 1; // Comeca em 1
     int pDepositoIndividual = -1; // Apontador local desta tarefa.
 
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
-        // 1. Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
+        //Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
         if (!AguardarDesbloqueioOuTermino(hEventoBloqSupervisorio, eventoEncerramento)) {
             break;
         }
 
-        // 2. Gera a mensagem formatada com 50 caracteres
+        //Gera a mensagem formatada com 50 caracteres
         string msg = GerarMensagemSupervisorio(nseq);
 
-        // 3. Incrementa o NSEQ (volta a 0 apos atingir 99999)
+        //Incrementa o NSEQ (volta a 0 apos atingir 99999)
         nseq++;
         if (nseq > 99999) {
             nseq = 0;
         }
 
-        // 4. Deposita a mensagem na Lista Circular 1
+        //Deposita a mensagem na Lista Circular 1
         if (!DepositarNaLista1(msg, "Leitura do Supervisorio", pDepositoIndividual,
                 hEventoBloqSupervisorio, eventoEncerramento)) {
-            break; // Sai se o utilizador premiu ESC enquanto a lista estava cheia
+            break; //Sai se o utilizador premiu ESC enquanto a lista estava cheia
         }
 
-        // 5. Temporizacao provisoria da Etapa 1 (1000 ms)
+        //Temporizacao provisoria da Etapa 1
         Sleep(1000);
     }
 
@@ -205,41 +203,41 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
 DWORD WINAPI LeituraPCP(LPVOID parametro) {
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
-    // Inicializa os numeros aleatorios (soma +2 para nao gerar valores iguais ao Supervisorio)
+    // Inicializa os numeros aleatorios
     srand((unsigned int)time(NULL) + 2);
 
     int nseq = 1; // Comeca em 1
     int pDepositoIndividual = -1; // Apontador local desta tarefa.
 
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
-        // 1. Verifica se a tecla 'm' bloqueou a tarefa ou se 'ESC' foi premido
+        //Verifica se a tecla 'm' bloqueou a tarefa ou se 'ESC' foi premido
         if (!AguardarDesbloqueioOuTermino(hEventoBloqPCP, eventoEncerramento)) {
             break;
         }
 
-        // 2. Gera a mensagem formatada com 31 caracteres
+        //Gera a mensagem formatada com 31 caracteres
         string msg = GerarMensagemPCP(nseq);
 
-        // 3. Incrementa o NSEQ (volta a 0 apos atingir 99999)
+        //Incrementa o NSEQ
         nseq++;
         if (nseq > 99999) {
             nseq = 0;
         }
 
-        // 4. Deposita a mensagem na Lista Circular 1
+        //Deposita a mensagem na Lista Circular
         if (!DepositarNaLista1(msg, "Leitura do PCP", pDepositoIndividual,
                 hEventoBloqPCP, eventoEncerramento)) {
-            break; // Sai se o utilizador premiu ESC enquanto a lista estava cheia
+            break; //Sai se o utilizador digitou ESC enquanto a lista estava cheia
         }
 
-        // 5. Temporizacao provisoria da Etapa 1 (1000 ms)
+        //Temporizacao provisoria da Etapa 1
         Sleep(1000);
     }
 
     return 0;
 }
 
-// Thread de retirada de mensagens
+//Thread de retirada de mensagens
 DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
@@ -258,7 +256,7 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
             estavaBloqueado = true;
 
             WaitForSingleObject(hMutexConsole, INFINITE);
-            cout << "[ESTADO] Tarefa de Retirada: BLOQUEADA" << endl;
+            cout << "[STATUS] Tarefa de Retirada: BLOQUEADA" << endl;
             ReleaseMutex(hMutexConsole);
         }
 
@@ -270,7 +268,7 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
             estavaBloqueado = false;
 
             WaitForSingleObject(hMutexConsole, INFINITE);
-            cout << "[ESTADO] Tarefa de Retirada: DESBLOQUEADA" << endl;
+            cout << "[STATUS] Tarefa de Retirada: DESBLOQUEADA" << endl;
             ReleaseMutex(hMutexConsole);
         }
 
@@ -278,24 +276,24 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
     };
 
     while (true) {
-        // Primeira verificacao: inicio da iteracao.
+        //Primeira verificacao: inicio da iteracao.
         if (!aguardarPermissao()) {
             break;
         }
 
         HANDLE eventos[] = { eventoEncerramento, hSemOcupadas1 };
 
-        // Verifica o bloqueio mesmo quando nao chegam mensagens.
+        //Verifica o bloqueio mesmo quando nao chegam mensagens.
         DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, 100);
         if (resultado == WAIT_TIMEOUT) {
             continue;
         }
 
         if (resultado != WAIT_OBJECT_0 + 1) {
-            break; // Encerramento solicitado ou falha na espera.
+            break; //Encerramento solicitado ou falha na espera.
         }
 
-        // Segunda verificacao: imediatamente apos adquirir uma mensagem.
+        //Segunda verificacao, imediatamente apos adquirir uma mensagem.
         if (!aguardarPermissao()) {
             ReleaseSemaphore(hSemOcupadas1, 1, nullptr);
             break;
@@ -308,11 +306,11 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
         ReleaseMutex(hMutexLista1);
 
-        // Somente agora a posicao pode ser reutilizada.
+        //Somente agora a posicao pode ser reutilizada.
         ReleaseSemaphore(hSemLivres1, 1, nullptr);
 
         WaitForSingleObject(hMutexConsole, INFINITE);
-        cout << "[RETIRADA] " << msgRetirada << endl;
+        cout << msgRetirada << endl;
         ReleaseMutex(hMutexConsole);
     }
 
@@ -321,12 +319,11 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
 // ============================================================
 // PROCESSO PRINCIPAL
-// ============================================================
 
 int main() {
 
     // --------------------------------------------------------
-    // 1. DECLARACAO DOS PROCESSOS
+    //DECLARACAO DOS PROCESSOS
     // --------------------------------------------------------
 
     STARTUPINFOW siExibicao = {};
@@ -339,7 +336,7 @@ int main() {
     siGestao.cb = sizeof(siGestao);
 
     // --------------------------------------------------------
-    // 2. CRIACAO DO EVENTO DE ENCERRAMENTO
+    //CRIACAO DO EVENTO DE ENCERRAMENTO
     // --------------------------------------------------------
 
     HANDLE eventoEncerramento = CreateEventW(
@@ -353,7 +350,7 @@ int main() {
         cout << "Erro ao criar evento de encerramento." << endl;
         return 1;
     }
-    // ADICIONE ESTE BLOCO AQUI (Antes do Passo 3 - CreateProcessW):
+    
     hEventoBloqSupervisorio = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     hEventoBloqPCP = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     hEventoBloqRetirada = CreateEventW(nullptr, TRUE, TRUE, nullptr);
@@ -366,7 +363,7 @@ int main() {
         return 1;
     }
 
-    // Criacao dos objetos de sincronizacao da Lista Circular 1
+    //Criacao dos objetos de sincronizacao da Lista Circular 
     hMutexLista1 = CreateMutexW(nullptr, FALSE, nullptr);
     hSemLivres1 = CreateSemaphoreW(nullptr, TAM_LISTA_1, TAM_LISTA_1, nullptr);
     hSemOcupadas1 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_1, nullptr);
@@ -378,12 +375,19 @@ int main() {
     }
 
     // --------------------------------------------------------
-    // 3. CRIACAO DOS PROCESSOS
+    //CRIACAO DOS PROCESSOS
     // --------------------------------------------------------
+    wchar_t bufferCaminho[MAX_PATH];
+    GetModuleFileNameW(nullptr, bufferCaminho, MAX_PATH);
+    wstring pastaExe(bufferCaminho);
+    pastaExe = pastaExe.substr(0, pastaExe.find_last_of(L"\\/"));
+
+    wstring caminhoExibicao = pastaExe + L"\\ExibicaoProcesso.exe";
+    wstring caminhoGestao = pastaExe + L"\\GestaoProducao.exe";
 
     // Processo de Exibicao dos Dados de Processo
     BOOL processoExibicao = CreateProcessW(
-        L"ExibicaoProcesso.exe",
+        caminhoExibicao.c_str(),
         nullptr,
         nullptr,
         nullptr,
@@ -402,7 +406,7 @@ int main() {
 
     // Processo de Gestao da Producao
     BOOL processoGestao = CreateProcessW(
-        L"GestaoProducao.exe",
+        caminhoGestao.c_str(),
         nullptr,
         nullptr,
         nullptr,
@@ -418,9 +422,8 @@ int main() {
         cout << "Erro ao criar processo de gestao: "
             << GetLastError() << endl;
     }
-
     // --------------------------------------------------------
-    // 4. CRIACAO DAS THREADS
+    //CRIACAO DAS THREADS
     // --------------------------------------------------------
 
     HANDLE hThreadSupervisorio = CreateThread(
@@ -456,12 +459,12 @@ int main() {
     }
 
     // --------------------------------------------------------
-    // 5. LEITURA DO TECLADO
+    // LEITURA DO TECLADO
     // --------------------------------------------------------
 
-    cout << "======================================" << endl;
+    cout << "______________________________________" << endl;
     cout << " SISTEMA DE MONITORAMENTO INDUSTRIAL " << endl;
-    cout << "======================================" << endl;
+    cout << "______________________________________" << endl;
 
     cout << "\nComandos disponiveis:\n" << endl;
     cout << "s - Bloquear/Desbloquear Supervisorio" << endl;
@@ -541,7 +544,7 @@ int main() {
     }
 
     // --------------------------------------------------------
-    // 6. ENCERRAMENTO DAS THREADS
+    // ENCERRAMENTO DAS THREADS
     // --------------------------------------------------------
 
     SetEvent(eventoEncerramento);
@@ -560,11 +563,8 @@ int main() {
     }
 
     // --------------------------------------------------------
-    // 7. ENCERRAMENTO DOS PROCESSOS
+    // ENCERRAMENTO DOS PROCESSOS
     // --------------------------------------------------------
-
-    // Os executaveis filhos devem responder ao evento nomeado
-    // Local\ELT127_Encerramento para finalizar normalmente.
 
     if (processoExibicao) {
         // Aguarda o filho responder ao evento de encerramento antes de fechar os handles.
