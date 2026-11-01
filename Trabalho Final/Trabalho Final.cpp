@@ -27,6 +27,22 @@ HANDLE hEventoBloqRetirada = NULL;
 HANDLE hEventoBloqExibicao = NULL;
 HANDLE hEventoBloqGestao = NULL;
 
+// Aguarda permissao para executar ou encerramento, com prioridade para encerrar.
+bool AguardarDesbloqueioOuTermino(HANDLE hEventoBloqueio, HANDLE hEventoEncerramento) {
+    HANDLE eventos[] = { hEventoEncerramento, hEventoBloqueio };
+    DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
+
+    if (resultado == WAIT_OBJECT_0) {
+        return false; // Encerramento solicitado, mesmo se a tarefa estiver bloqueada.
+    }
+
+    if (resultado == WAIT_OBJECT_0 + 1) {
+        return true; // Evento de bloqueio sinalizado: tarefa liberada.
+    }
+
+    return false; // Falha na espera: interrompe a tarefa.
+}
+
 // Gera mensagem de 50 caracteres do Supervisorio
 // Formato: "1/NNNNN/NNN.N/NNN.N/NNN.N/NNN.N/NNN.N/HH:MM:SS.NNN"[cite: 2]
 string GerarMensagemSupervisorio(int nseq) {
@@ -123,9 +139,9 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
 
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
         // 1. Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
-        //if (!AguardarDesbloqueioOuTermino(3, eventoEncerramento)) {
-        //    break;
-        //}
+        if (!AguardarDesbloqueioOuTermino(hEventoBloqSupervisorio, eventoEncerramento)) {
+            break;
+        }
 
         // 2. Gera a mensagem formatada com 50 caracteres
         string msg = GerarMensagemSupervisorio(nseq);
@@ -159,9 +175,9 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
 
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
         // 1. Verifica se a tecla 'm' bloqueou a tarefa ou se 'ESC' foi premido
-        //if (!AguardarDesbloqueioOuTermino(hEventoBloqPCP, eventoEncerramento)) {
-        //    break;
-        //}
+        if (!AguardarDesbloqueioOuTermino(hEventoBloqPCP, eventoEncerramento)) {
+            break;
+        }
 
         // 2. Gera a mensagem formatada com 31 caracteres
         string msg = GerarMensagemPCP(nseq);
@@ -190,6 +206,10 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
     while (true) {
+        // Verifica a permissao antes de aguardar mensagens, sem manter mutex adquirido.
+        if (!AguardarDesbloqueioOuTermino(hEventoBloqRetirada, eventoEncerramento)) {
+            break;
+        }
 
         HANDLE eventosEspera[2] = { eventoEncerramento, hSemOcupadas1 };
         DWORD status = WaitForMultipleObjects(2, eventosEspera, FALSE, INFINITE);
@@ -383,32 +403,54 @@ int main() {
 
         switch (tecla) {
 
-        case 's':
-            // TODO: Bloquear/Desbloquear Supervisorio
+        case 's': {
+            DWORD estado = WaitForSingleObject(hEventoBloqSupervisorio, 0);
+            if (estado == WAIT_OBJECT_0)
+                ResetEvent(hEventoBloqSupervisorio); // Bloqueia
+            else if (estado == WAIT_TIMEOUT)
+                SetEvent(hEventoBloqSupervisorio);   // Desbloqueia
             break;
+        }
 
-        case 'm':
-            // TODO: Bloquear/Desbloquear PCP
+        case 'm': {
+            DWORD estado = WaitForSingleObject(hEventoBloqPCP, 0);
+            if (estado == WAIT_OBJECT_0)
+                ResetEvent(hEventoBloqPCP);
+            else if (estado == WAIT_TIMEOUT)
+                SetEvent(hEventoBloqPCP);
             break;
+        }
 
-        case 'r':
-            // TODO: Bloquear/Desbloquear Retirada
+        case 'r': {
+            DWORD estado = WaitForSingleObject(hEventoBloqRetirada, 0);
+            if (estado == WAIT_OBJECT_0)
+                ResetEvent(hEventoBloqRetirada);
+            else if (estado == WAIT_TIMEOUT)
+                SetEvent(hEventoBloqRetirada);
             break;
+        }
 
-        case 'p':
-            // TODO: Bloquear/Desbloquear Exibicao
+        case 'p': {
+            DWORD estado = WaitForSingleObject(hEventoBloqExibicao, 0);
+            if (estado == WAIT_OBJECT_0)
+                ResetEvent(hEventoBloqExibicao);
+            else if (estado == WAIT_TIMEOUT)
+                SetEvent(hEventoBloqExibicao);
             break;
+        }
 
-        case 'g':
-            // TODO: Bloquear/Desbloquear Gestao
+        case 'g': {
+            DWORD estado = WaitForSingleObject(hEventoBloqGestao, 0);
+            if (estado == WAIT_OBJECT_0)
+                ResetEvent(hEventoBloqGestao);
+            else if (estado == WAIT_TIMEOUT)
+                SetEvent(hEventoBloqGestao);
             break;
+        }
 
         case '1':
-            // TODO: Limpar console de processo
-            break;
-
         case '2':
-            // TODO: Limpar console de gestao
+            cout << "[Aviso] Sinal de limpeza enviado\n";
             break;
 
         case 27: // ESC
@@ -444,11 +486,20 @@ int main() {
     // Local\ELT127_Encerramento para finalizar normalmente.
 
     if (processoExibicao) {
+        // Aguarda o filho responder ao evento de encerramento antes de fechar os handles.
+        DWORD resultado = WaitForSingleObject(piExibicao.hProcess, INFINITE);
+        if (resultado == WAIT_FAILED) {
+            cout << "Erro ao aguardar processo de exibicao: " << GetLastError() << endl;
+        }
         CloseHandle(piExibicao.hThread);
         CloseHandle(piExibicao.hProcess);
     }
 
     if (processoGestao) {
+        DWORD resultado = WaitForSingleObject(piGestao.hProcess, INFINITE);
+        if (resultado == WAIT_FAILED) {
+            cout << "Erro ao aguardar processo de gestao: " << GetLastError() << endl;
+        }
         CloseHandle(piGestao.hThread);
         CloseHandle(piGestao.hProcess);
     }
