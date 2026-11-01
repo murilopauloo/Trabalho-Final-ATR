@@ -12,8 +12,12 @@ using namespace std;
 
 const int TAM_LISTA_1 = 100;
 string listaCircular1[TAM_LISTA_1];
-int pLivre1 = 0;   //Apontador de insercao (Produtores)
-int pOcupado1 = 0; //Apontador de retirada (Consumidor)
+// Indices compartilhados, manipulados somente com hMutexLista1 adquirido.
+int pLivre1 = 0;       // Proxima posicao a reservar.
+int pPublicacao1 = 0;  // Proxima posicao a disponibilizar para retirada.
+
+// true: escrita concluida, mas ainda nao publicada no semaforo.
+bool prontaParaPublicar1[TAM_LISTA_1] = {};
 
 HANDLE hMutexLista1 = NULL; //Protege o acesso aos apontadores e ao array
 HANDLE hSemLivres1 = NULL; //Conta espacos livres (inicia em 100)
@@ -89,38 +93,69 @@ string GerarMensagemPCP(int nseq) {
 }
 
 //FUNÇÃO AUXILIAR DE DEPOSITO DE MENSAGEM
-bool DepositarNaLista1(const string& mensagem, const string& nomeTarefa, HANDLE eventoEncerramento) {
-    //Verifica sem bloquear (timeout = 0) se ha espaco livre
+bool DepositarNaLista1(
+    const string& mensagem,
+    const string& nomeTarefa,
+    int& apontadorIndividual,
+    HANDLE hEventoBloqueio,
+    HANDLE eventoEncerramento)
+{
     DWORD resultado = WaitForSingleObject(hSemLivres1, 0);
 
     if (resultado == WAIT_TIMEOUT) {
-
-        //O semaforo estava em 0: a lista esta cheia
         WaitForSingleObject(hMutexConsole, INFINITE);
-        cout << "[AVISO] Lista circular 1 cheia! Tarefa " << nomeTarefa
-            << " bloqueada aguardando posicao livre..." << endl;
+        cout << "[AVISO] Lista circular 1 cheia! Tarefa "
+             << nomeTarefa << " aguardando posicao livre..." << endl;
         ReleaseMutex(hMutexConsole);
 
-        //Bloqueia esperando OU abrir espaco na lista OU o comando ESC de encerramento
-        HANDLE eventosEspera[2] = { eventoEncerramento, hSemLivres1 };
-        DWORD causaDesbloqueio = WaitForMultipleObjects(2, eventosEspera, FALSE, INFINITE);
+        HANDLE eventos[] = { eventoEncerramento, hSemLivres1 };
+        resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
 
-        //Se desbloqueou porque o indice 0 (eventoEncerramento) foi acionado, aborta
-        if (causaDesbloqueio == WAIT_OBJECT_0) {
+        // Continua somente se uma vaga foi adquirida.
+        if (resultado != WAIT_OBJECT_0 + 1) {
             return false;
         }
     }
+    else if (resultado != WAIT_OBJECT_0) {
+        return false; // Falha ao aguardar o semaforo.
+    }
 
-    //Temos 1 vaga garantida pelo semaforo. Travamos o Mutex para escrever na memoria:
+    // A tarefa pode ter sido bloqueada enquanto aguardava uma vaga.
+    if (!AguardarDesbloqueioOuTermino(hEventoBloqueio, eventoEncerramento)) {
+        ReleaseSemaphore(hSemLivres1, 1, nullptr);
+        return false;
+    }
+
+    // Reserva uma posicao exclusiva para esta tarefa.
     WaitForSingleObject(hMutexLista1, INFINITE);
 
-    listaCircular1[pLivre1] = mensagem;
+    apontadorIndividual = pLivre1;
     pLivre1 = (pLivre1 + 1) % TAM_LISTA_1;
 
     ReleaseMutex(hMutexLista1);
 
-    //Sinaliza para a tarefa de Retirada que ha 1 nova mensagem ocupada
-    ReleaseSemaphore(hSemOcupadas1, 1, nullptr);
+    // Cada produtor escreve na posicao que reservou.
+    listaCircular1[apontadorIndividual] = mensagem;
+
+    // Apos reservar, conclui a escrita e a publicacao sem novas esperas
+    // de bloqueio, evitando deixar uma lacuna na fila.
+    WaitForSingleObject(hMutexLista1, INFINITE);
+
+    prontaParaPublicar1[apontadorIndividual] = true;
+    int quantidadePublicada = 0;
+
+    // Disponibiliza somente mensagens consecutivas ja prontas.
+    while (prontaParaPublicar1[pPublicacao1]) {
+        prontaParaPublicar1[pPublicacao1] = false;
+        pPublicacao1 = (pPublicacao1 + 1) % TAM_LISTA_1;
+        quantidadePublicada++;
+    }
+
+    if (quantidadePublicada > 0) {
+        ReleaseSemaphore(hSemOcupadas1, quantidadePublicada, nullptr);
+    }
+
+    ReleaseMutex(hMutexLista1);
     return true;
 }
 
@@ -136,6 +171,7 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
     srand((unsigned int)time(NULL) + 1);
 
     int nseq = 1; // Comeca em 1
+    int pDepositoIndividual = -1; // Apontador local desta tarefa.
 
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
         // 1. Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
@@ -153,7 +189,8 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
         }
 
         // 4. Deposita a mensagem na Lista Circular 1
-        if (!DepositarNaLista1(msg, "Leitura do Supervisorio", eventoEncerramento)) {
+        if (!DepositarNaLista1(msg, "Leitura do Supervisorio", pDepositoIndividual,
+                hEventoBloqSupervisorio, eventoEncerramento)) {
             break; // Sai se o utilizador premiu ESC enquanto a lista estava cheia
         }
 
@@ -172,6 +209,7 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
     srand((unsigned int)time(NULL) + 2);
 
     int nseq = 1; // Comeca em 1
+    int pDepositoIndividual = -1; // Apontador local desta tarefa.
 
     while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
         // 1. Verifica se a tecla 'm' bloqueou a tarefa ou se 'ESC' foi premido
@@ -189,7 +227,8 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
         }
 
         // 4. Deposita a mensagem na Lista Circular 1
-        if (!DepositarNaLista1(msg, "Leitura do PCP", eventoEncerramento)) {
+        if (!DepositarNaLista1(msg, "Leitura do PCP", pDepositoIndividual,
+                hEventoBloqPCP, eventoEncerramento)) {
             break; // Sai se o utilizador premiu ESC enquanto a lista estava cheia
         }
 
@@ -202,34 +241,76 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
 
 // Thread de retirada de mensagens
 DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
-
     HANDLE eventoEncerramento = (HANDLE)parametro;
 
-    while (true) {
-        // Verifica a permissao antes de aguardar mensagens, sem manter mutex adquirido.
+    // Apontador individual desta tarefa.
+    int pRetiradaIndividual = 0;
+    bool estavaBloqueado = false;
+
+    // Centraliza a verificacao de permissao e a exibicao do estado.
+    auto aguardarPermissao = [&]() -> bool {
+        DWORD estado = WaitForSingleObject(hEventoBloqRetirada, 0);
+        if (estado == WAIT_FAILED) {
+            return false;
+        }
+
+        if (estado == WAIT_TIMEOUT && !estavaBloqueado) {
+            estavaBloqueado = true;
+
+            WaitForSingleObject(hMutexConsole, INFINITE);
+            cout << "[ESTADO] Tarefa de Retirada: BLOQUEADA" << endl;
+            ReleaseMutex(hMutexConsole);
+        }
+
         if (!AguardarDesbloqueioOuTermino(hEventoBloqRetirada, eventoEncerramento)) {
+            return false;
+        }
+
+        if (estavaBloqueado) {
+            estavaBloqueado = false;
+
+            WaitForSingleObject(hMutexConsole, INFINITE);
+            cout << "[ESTADO] Tarefa de Retirada: DESBLOQUEADA" << endl;
+            ReleaseMutex(hMutexConsole);
+        }
+
+        return true;
+    };
+
+    while (true) {
+        // Primeira verificacao: inicio da iteracao.
+        if (!aguardarPermissao()) {
             break;
         }
 
-        HANDLE eventosEspera[2] = { eventoEncerramento, hSemOcupadas1 };
-        DWORD status = WaitForMultipleObjects(2, eventosEspera, FALSE, INFINITE);
+        HANDLE eventos[] = { eventoEncerramento, hSemOcupadas1 };
 
-        if (status == WAIT_OBJECT_0) {
-            break; // Evento de encerramento (ESC) acionado! Sai do while.
+        // Verifica o bloqueio mesmo quando nao chegam mensagens.
+        DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, 100);
+        if (resultado == WAIT_TIMEOUT) {
+            continue;
         }
 
-        //Se chegou aqui, hSemOcupadas1 foi decrementado (ha mensagem para ler)
+        if (resultado != WAIT_OBJECT_0 + 1) {
+            break; // Encerramento solicitado ou falha na espera.
+        }
+
+        // Segunda verificacao: imediatamente apos adquirir uma mensagem.
+        if (!aguardarPermissao()) {
+            ReleaseSemaphore(hSemOcupadas1, 1, nullptr);
+            break;
+        }
+
         WaitForSingleObject(hMutexLista1, INFINITE);
 
-        string msgRetirada = listaCircular1[pOcupado1];
-        pOcupado1 = (pOcupado1 + 1) % TAM_LISTA_1;
+        string msgRetirada = listaCircular1[pRetiradaIndividual];
+        pRetiradaIndividual = (pRetiradaIndividual + 1) % TAM_LISTA_1;
 
         ReleaseMutex(hMutexLista1);
 
-        //Libera 1 posicao livre no semaforo para os produtores (Supervisorio e PCP)
+        // Somente agora a posicao pode ser reutilizada.
         ReleaseSemaphore(hSemLivres1, 1, nullptr);
 
-        //Exibe na console principal (requisito da Etapa 1)
         WaitForSingleObject(hMutexConsole, INFINITE);
         cout << "[RETIRADA] " << msgRetirada << endl;
         ReleaseMutex(hMutexConsole);
