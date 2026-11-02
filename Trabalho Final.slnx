@@ -3,7 +3,18 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="Trabalho Final/Trabalho Final.vcxproj" Id="2a74d98e-a64b-4a2c-9a23-2feca37455e8" />
-  <Project Path="GestaoProducao/GestaoProducao.vcxproj" Id="3b148ab3-0185-411a-8151-962b1aa30a96" />
-  <Project Path="ExibicaoProcesso/ExibicaoProcesso.vcxproj" Id="6273733d-403a-43cb-8fe4-c945f921dbc8" />
+
+  <Project
+    Path="Trabalho Final/Trabalho Final.vcxproj"
+    Id="2a74d98e-a64b-4a2c-9a23-2feca37455e8"
+    DefaultStartup="true" />
+
+  <Project
+    Path="GestaoProducao/GestaoProducao.vcxproj"
+    Id="3b148ab3-0185-411a-8151-962b1aa30a96" />
+
+  <Project
+    Path="ExibicaoProcesso/ExibicaoProcesso.vcxproj"
+    Id="6273733d-403a-43cb-8fe4-c945f921dbc8" />
+
 </Solution>
