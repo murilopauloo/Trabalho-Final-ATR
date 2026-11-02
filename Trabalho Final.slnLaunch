@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "Novo Perfil",
+    "Projects": [
+      {
+        "Path": "Trabalho Final\\Trabalho Final.vcxproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
