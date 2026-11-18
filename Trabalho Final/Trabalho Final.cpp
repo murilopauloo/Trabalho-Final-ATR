@@ -11,7 +11,7 @@ using namespace std;
 
 const int TAM_LISTA_1 = 100;
 string listaCircular1[TAM_LISTA_1];
-// Indices compartilhados, manipulados somente com hMutexLista1 adquirido
+// Indices compartilhados
 int pLivre1 = 0;// Proxima posicao a reservar
 int pPublicacao1 = 0;// Proxima posicao a disponibilizar para retirada
 
@@ -171,31 +171,50 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
     int nseq = 1; // Comeca em 1
     int pDepositoIndividual = -1; // Apontador local desta tarefa.
 
-    while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
-        //Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
+    // Multiplicador para converter milissegundos em intervalos de 100 ns (padrao Win32)
+    const LONGLONG nMultiplicadorParaMs = 10000;
+    LARGE_INTEGER Preset;
+
+    //Waitable Timer de sincronizacao (reset automatico)
+    HANDLE hTimerSup = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    if (!hTimerSup) {
+        return 1;
+    }
+
+    // Primeiro disparo em 500 ms e periodo continuo de 500 ms
+    Preset.QuadPart = -(500 * nMultiplicadorParaMs);
+    if (!SetWaitableTimer(hTimerSup, &Preset, 500, nullptr, nullptr, FALSE)) {
+        CloseHandle(hTimerSup);
+        return 1;
+    }
+
+   
+    HANDLE eventosTimer[2] = { eventoEncerramento, hTimerSup };
+
+    while (true) {
+        //Aguarda o pulso de 500 ms do Timer ou o acionamento de ESC
+        DWORD ret = WaitForMultipleObjects(2, eventosTimer, FALSE, INFINITE);
+        if (ret == WAIT_OBJECT_0) {
+            break; // ESC foi pressionado! Encerra imediatamente.
+        }
+
+        // 2. Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
         if (!AguardarDesbloqueioOuTermino(hEventoBloqSupervisorio, eventoEncerramento)) {
             break;
         }
-
-        //Gera a mensagem formatada com 50 caracteres
         string msg = GerarMensagemSupervisorio(nseq);
-
-        //Incrementa o NSEQ (volta a 0 apos atingir 99999)
         nseq++;
         if (nseq > 99999) {
             nseq = 0;
         }
 
-        //Deposita a mensagem na Lista Circular 1
         if (!DepositarNaLista1(msg, "Leitura do Supervisorio", pDepositoIndividual,
-                hEventoBloqSupervisorio, eventoEncerramento)) {
-            break; //Sai se o utilizador premiu ESC enquanto a lista estava cheia
+            hEventoBloqSupervisorio, eventoEncerramento)) {
+            break;
         }
-
-        //Temporizacao provisoria da Etapa 1
-        Sleep(1000);
     }
 
+    CloseHandle(hTimerSup);
     return 0;
 }
 
@@ -209,31 +228,48 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
     int nseq = 1; // Comeca em 1
     int pDepositoIndividual = -1; // Apontador local desta tarefa.
 
-    while (WaitForSingleObject(eventoEncerramento, 0) == WAIT_TIMEOUT) {
-        //Verifica se a tecla 'm' bloqueou a tarefa ou se 'ESC' foi premido
+    const LONGLONG nMultiplicadorParaMs = 10000;
+    LARGE_INTEGER Preset;
+
+    //Waitable Timer de sincronizacao (reset automatico)
+    HANDLE hTimerPCP = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    if (!hTimerPCP) {
+        return 1;
+    }
+
+    HANDLE eventosTimer[2] = { eventoEncerramento, hTimerPCP };
+
+    while (true) {
+        //Sorteia tempo aleatorio entre 1000 ms (1s) e 5000 ms (5s)
+        int tempoAleatorioMs = 1000 + (rand() % 4001);
+        Preset.QuadPart = -(tempoAleatorioMs * nMultiplicadorParaMs);
+
+        //Programa o timer para disparar uma unica vez (periodo = 0) apos o tempo sorteado
+        if (!SetWaitableTimer(hTimerPCP, &Preset, 0, nullptr, nullptr, FALSE)) {
+            break;
+        }
+
+        DWORD ret = WaitForMultipleObjects(2, eventosTimer, FALSE, INFINITE);
+        if (ret == WAIT_OBJECT_0) {
+            break;
+        }
+
         if (!AguardarDesbloqueioOuTermino(hEventoBloqPCP, eventoEncerramento)) {
             break;
         }
 
-        //Gera a mensagem formatada com 31 caracteres
         string msg = GerarMensagemPCP(nseq);
-
-        //Incrementa o NSEQ
         nseq++;
         if (nseq > 99999) {
             nseq = 0;
         }
-
-        //Deposita a mensagem na Lista Circular
         if (!DepositarNaLista1(msg, "Leitura do PCP", pDepositoIndividual,
-                hEventoBloqPCP, eventoEncerramento)) {
-            break; //Sai se o utilizador digitou ESC enquanto a lista estava cheia
+            hEventoBloqPCP, eventoEncerramento)) {
+            break; 
         }
-
-        //Temporizacao provisoria da Etapa 1
-        Sleep(1000);
     }
 
+    CloseHandle(hTimerPCP);
     return 0;
 }
 
