@@ -1,6 +1,10 @@
 #include <windows.h>
 #include <iostream>
 #include <sstream> 
+
+#define _CHECKERROR 1 // Ativa a checagem de erros no padrao do exemplo do professor.
+#include "../CheckForError.h"
+
 using namespace std;
 
 const int TAM_LISTA_2 = 200;
@@ -32,23 +36,24 @@ void ExibirMensagemFormatada(const string& msg) {
 }
 
 int main() {
-    SetConsoleTitleW(L"Tela de Exibicao de Dados de Processo");
+    CheckForError(SetConsoleTitleW(L"Tela de Exibicao de Dados de Processo"));
 
     //Abre os eventos nomeados criados pelo Processo Principal
     HANDLE hEventoEncerramento = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\ELT127_Encerramento");
+    CheckForError(hEventoEncerramento);
     HANDLE hEventoBloqueio = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\ELT127_BloqExibicao");
+    CheckForError(hEventoBloqueio);
 
     // 2. Abre a Memoria Compartilhada e os objetos de sincronizacao da Lista Circular 2
     HANDLE hMapLista2 = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\ELT127_MemLista2");
+    CheckForError(hMapLista2);
     HANDLE hMutexLista2 = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\ELT127_MutexLista2");
+    CheckForError(hMutexLista2);
     HANDLE hSemLivres2 = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, L"Local\\ELT127_SemLivres2");
+    CheckForError(hSemLivres2);
     HANDLE hSemOcupadas2 = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, L"Local\\ELT127_SemOcupadas2");
+    CheckForError(hSemOcupadas2);
 
-    if (!hEventoEncerramento || !hEventoBloqueio || !hMapLista2 || !hMutexLista2 || !hSemLivres2 || !hSemOcupadas2) {
-        cout << "Erro ao abrir objetos compartilhados da Lista 2: " << GetLastError() << endl;
-        Sleep(5000);
-        return 1;
-    }
 
     ListaCircular2Compartilhada* lpLista2 = (ListaCircular2Compartilhada*)MapViewOfFile(
         hMapLista2,
@@ -57,16 +62,7 @@ int main() {
         sizeof(ListaCircular2Compartilhada)
     );
 
-    if (!lpLista2) {
-        cout << "Erro ao mapear Lista 2 na memoria: " << GetLastError() << endl;
-        CloseHandle(hSemOcupadas2);
-        CloseHandle(hSemLivres2);
-        CloseHandle(hMutexLista2);
-        CloseHandle(hMapLista2);
-        CloseHandle(hEventoBloqueio);
-        CloseHandle(hEventoEncerramento);
-        return 1;
-    }
+    CheckForError(lpLista2);
 
     cout << "_________________________________________________" << endl;
     cout << "   TAREFA DE EXIBICAO DE PROCESSO      " << endl;
@@ -77,12 +73,15 @@ int main() {
 
     while (true) {
         // Verifica encerramento imediato
-        if (WaitForSingleObject(hEventoEncerramento, 0) == WAIT_OBJECT_0) {
+        DWORD encerramento = WaitForSingleObject(hEventoEncerramento, 0);
+        CheckForError(encerramento != WAIT_FAILED);
+        if (encerramento == WAIT_OBJECT_0) {
             break;
         }
 
         // Verifica estado de bloqueio (tecla 'p')
         DWORD statusBloq = WaitForSingleObject(hEventoBloqueio, 0);
+        CheckForError(statusBloq != WAIT_FAILED);
         bool bloqueadoAgora = (statusBloq == WAIT_TIMEOUT);
 
         if (bloqueadoAgora != estavaBloqueado) {
@@ -97,7 +96,9 @@ int main() {
 
         if (estavaBloqueado) {
             HANDLE evBloq[2] = { hEventoEncerramento, hEventoBloqueio };
-            if (WaitForMultipleObjects(2, evBloq, FALSE, 100) == WAIT_OBJECT_0) {
+            DWORD resultadoBloqueio = WaitForMultipleObjects(2, evBloq, FALSE, 100);
+            CheckForError(resultadoBloqueio != WAIT_FAILED);
+            if (resultadoBloqueio == WAIT_OBJECT_0) {
                 break;
             }
             continue;
@@ -106,6 +107,7 @@ int main() {
         // Aguarda mensagem disponivel na Lista Circular 2 ou sinal de encerramento
         HANDLE evConsumo[2] = { hEventoEncerramento, hSemOcupadas2 };
         DWORD res = WaitForMultipleObjects(2, evConsumo, FALSE, 100);
+        CheckForError(res != WAIT_FAILED);
 
         if (res == WAIT_TIMEOUT) {
             continue;
@@ -115,13 +117,13 @@ int main() {
         }
 
         // Retira mensagem da Lista Circular 2 sob exclusao mutua
-        WaitForSingleObject(hMutexLista2, INFINITE);
+        CheckForError(WaitForSingleObject(hMutexLista2, INFINITE) != WAIT_FAILED);
         string msgLida(lpLista2->mensagens[lpLista2->pOcupado2]);
         lpLista2->pOcupado2 = (lpLista2->pOcupado2 + 1) % TAM_LISTA_2;
-        ReleaseMutex(hMutexLista2);
+        CheckForError(ReleaseMutex(hMutexLista2));
 
         // Devolve 1 vaga livre para a Lista Circular 2
-        ReleaseSemaphore(hSemLivres2, 1, nullptr);
+        CheckForError(ReleaseSemaphore(hSemLivres2, 1, nullptr));
 
         // Formata e exibe na tela exclusiva
         ExibirMensagemFormatada(msgLida);
@@ -129,12 +131,12 @@ int main() {
 
     cout << "\nEncerrando Tarefa de Exibicao de Processo..." << endl;
 
-    UnmapViewOfFile(lpLista2);
-    CloseHandle(hSemOcupadas2);
-    CloseHandle(hSemLivres2);
-    CloseHandle(hMutexLista2);
-    CloseHandle(hMapLista2);
-    CloseHandle(hEventoBloqueio);
-    CloseHandle(hEventoEncerramento);
+    CheckForError(UnmapViewOfFile(lpLista2));
+    CheckForError(CloseHandle(hSemOcupadas2));
+    CheckForError(CloseHandle(hSemLivres2));
+    CheckForError(CloseHandle(hMutexLista2));
+    CheckForError(CloseHandle(hMapLista2));
+    CheckForError(CloseHandle(hEventoBloqueio));
+    CheckForError(CloseHandle(hEventoEncerramento));
     return 0;
 }

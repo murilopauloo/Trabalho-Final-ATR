@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <ctime>
 
+#define _CHECKERROR 1 // Ativa a checagem de erros no padrao do exemplo do professor.
+#include "../CheckForError.h"
+
 using namespace std;
 
 const int TAM_LISTA_1 = 100;
@@ -50,6 +53,7 @@ HANDLE hEventoBloqGestao = NULL;
 bool AguardarDesbloqueioOuTermino(HANDLE hEventoBloqueio, HANDLE hEventoEncerramento) {
     HANDLE eventos[] = { hEventoEncerramento, hEventoBloqueio };
     DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
+    CheckForError(resultado != WAIT_FAILED);
 
     if (resultado == WAIT_OBJECT_0) {
         return false; //Encerramento solicitado, mesmo se a tarefa estiver bloqueada
@@ -116,15 +120,17 @@ bool DepositarNaLista1(
     HANDLE eventoEncerramento)
 {
     DWORD resultado = WaitForSingleObject(hSemLivres1, 0);
+    CheckForError(resultado != WAIT_FAILED);
 
     if (resultado == WAIT_TIMEOUT) {
-        WaitForSingleObject(hMutexConsole, INFINITE);
+        CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
         cout << "[AVISO] Lista circular 1 cheia! Tarefa "
              << nomeTarefa << " aguardando posicao livre..." << endl;
-        ReleaseMutex(hMutexConsole);
+        CheckForError(ReleaseMutex(hMutexConsole));
 
         HANDLE eventos[] = { eventoEncerramento, hSemLivres1 };
         resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
+        CheckForError(resultado != WAIT_FAILED);
 
         //Continua somente se uma vaga foi adqurida
         if (resultado != WAIT_OBJECT_0 + 1) {
@@ -137,23 +143,23 @@ bool DepositarNaLista1(
 
     //A tarefa pode ter sido bloqueada enquanto aguardava uma vaga
     if (!AguardarDesbloqueioOuTermino(hEventoBloqueio, eventoEncerramento)) {
-        ReleaseSemaphore(hSemLivres1, 1, nullptr);
+        CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
         return false;
     }
 
     //Reserva uma posicao exclusiva para esta tarefa
-    WaitForSingleObject(hMutexLista1, INFINITE);
+    CheckForError(WaitForSingleObject(hMutexLista1, INFINITE) != WAIT_FAILED);
 
     apontadorIndividual = pLivre1;
     pLivre1 = (pLivre1 + 1) % TAM_LISTA_1;
 
-    ReleaseMutex(hMutexLista1);
+    CheckForError(ReleaseMutex(hMutexLista1));
 
     //Cada produtor escreve na posicao que reservou
     listaCircular1[apontadorIndividual] = mensagem;
 
     //Apos reservar, conclui a escrita e a publicacao sem novas esperas de bloqueio, evitando deixar uma lacuna na fila
-    WaitForSingleObject(hMutexLista1, INFINITE);
+    CheckForError(WaitForSingleObject(hMutexLista1, INFINITE) != WAIT_FAILED);
 
     prontaParaPublicar1[apontadorIndividual] = true;
     int quantidadePublicada = 0;
@@ -166,24 +172,26 @@ bool DepositarNaLista1(
     }
 
     if (quantidadePublicada > 0) {
-        ReleaseSemaphore(hSemOcupadas1, quantidadePublicada, nullptr);
+        CheckForError(ReleaseSemaphore(hSemOcupadas1, quantidadePublicada, nullptr));
     }
 
-    ReleaseMutex(hMutexLista1);
+    CheckForError(ReleaseMutex(hMutexLista1));
     return true;
 }
 
 //Função auxiliar de deposito de  mensagem de dados de processo na Lista Circular 2 
 bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE eventoEncerramento) {
     DWORD resultado = WaitForSingleObject(hSemLivres2, 0);
+    CheckForError(resultado != WAIT_FAILED);
 
     if (resultado == WAIT_TIMEOUT) {
-        WaitForSingleObject(hMutexConsole, INFINITE);
+        CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
         cout << "[AVISO] Lista circular 2 cheia! Tarefa de Retirada aguardando posicao livre..." << endl;
-        ReleaseMutex(hMutexConsole);
+        CheckForError(ReleaseMutex(hMutexConsole));
 
         HANDLE eventos[] = { eventoEncerramento, hSemLivres2 };
         resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
+        CheckForError(resultado != WAIT_FAILED);
         if (resultado != WAIT_OBJECT_0 + 1) {
             return false; // ESC pressionado
         }
@@ -193,20 +201,20 @@ bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE ev
     }
 
     if (!AguardarDesbloqueioOuTermino(hEventoBloqueio, eventoEncerramento)) {
-        ReleaseSemaphore(hSemLivres2, 1, nullptr);
+        CheckForError(ReleaseSemaphore(hSemLivres2, 1, nullptr));
         return false;
     }
 
     // Escreve na memoria compartilhada protegida pelo Mutex
-    WaitForSingleObject(hMutexLista2, INFINITE);
+    CheckForError(WaitForSingleObject(hMutexLista2, INFINITE) != WAIT_FAILED);
 
     strcpy_s(lpLista2->mensagens[lpLista2->pLivre2], TAM_MSG_PROCESSO, mensagem.c_str());
     lpLista2->pLivre2 = (lpLista2->pLivre2 + 1) % TAM_LISTA_2;
 
-    ReleaseMutex(hMutexLista2);
+    CheckForError(ReleaseMutex(hMutexLista2));
 
     //Avisa o processo ExibicaoProcesso que ha 1 nova mensagem disponivel
-    ReleaseSemaphore(hSemOcupadas2, 1, nullptr);
+    CheckForError(ReleaseSemaphore(hSemOcupadas2, 1, nullptr));
     return true;
 }
 
@@ -230,16 +238,11 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
 
     //Waitable Timer de sincronizacao (reset automatico)
     HANDLE hTimerSup = CreateWaitableTimerW(nullptr, FALSE, nullptr);
-    if (!hTimerSup) {
-        return 1;
-    }
+    CheckForError(hTimerSup);
 
     // Primeiro disparo em 500 ms e periodo continuo de 500 ms
     Preset.QuadPart = -(500 * nMultiplicadorParaMs);
-    if (!SetWaitableTimer(hTimerSup, &Preset, 500, nullptr, nullptr, FALSE)) {
-        CloseHandle(hTimerSup);
-        return 1;
-    }
+    CheckForError(SetWaitableTimer(hTimerSup, &Preset, 500, nullptr, nullptr, FALSE));
 
    
     HANDLE eventosTimer[2] = { eventoEncerramento, hTimerSup };
@@ -247,6 +250,7 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
     while (true) {
         //Aguarda o pulso de 500 ms do Timer ou o acionamento de ESC
         DWORD ret = WaitForMultipleObjects(2, eventosTimer, FALSE, INFINITE);
+        CheckForError(ret != WAIT_FAILED);
         if (ret == WAIT_OBJECT_0) {
             break; // ESC foi pressionado! Encerra imediatamente.
         }
@@ -267,7 +271,7 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
         }
     }
 
-    CloseHandle(hTimerSup);
+    CheckForError(CloseHandle(hTimerSup));
     return 0;
 }
 
@@ -286,9 +290,7 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
 
     //Waitable Timer de sincronizacao (reset automatico)
     HANDLE hTimerPCP = CreateWaitableTimerW(nullptr, FALSE, nullptr);
-    if (!hTimerPCP) {
-        return 1;
-    }
+    CheckForError(hTimerPCP);
 
     HANDLE eventosTimer[2] = { eventoEncerramento, hTimerPCP };
 
@@ -298,11 +300,10 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
         Preset.QuadPart = -(tempoAleatorioMs * nMultiplicadorParaMs);
 
         //Programa o timer para disparar uma unica vez (periodo = 0) apos o tempo sorteado
-        if (!SetWaitableTimer(hTimerPCP, &Preset, 0, nullptr, nullptr, FALSE)) {
-            break;
-        }
+        CheckForError(SetWaitableTimer(hTimerPCP, &Preset, 0, nullptr, nullptr, FALSE));
 
         DWORD ret = WaitForMultipleObjects(2, eventosTimer, FALSE, INFINITE);
+        CheckForError(ret != WAIT_FAILED);
         if (ret == WAIT_OBJECT_0) {
             break;
         }
@@ -322,7 +323,7 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
         }
     }
   
-    CloseHandle(hTimerPCP);
+    CheckForError(CloseHandle(hTimerPCP));
     return 0;
 }
 
@@ -337,16 +338,14 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
     // Centraliza a verificacao de permissao e a exibicao do estado.
     auto aguardarPermissao = [&]() -> bool {
         DWORD estado = WaitForSingleObject(hEventoBloqRetirada, 0);
-        if (estado == WAIT_FAILED) {
-            return false;
-        }
+        CheckForError(estado != WAIT_FAILED);
 
         if (estado == WAIT_TIMEOUT && !estavaBloqueado) {
             estavaBloqueado = true;
 
-            WaitForSingleObject(hMutexConsole, INFINITE);
+            CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
             cout << "[STATUS] Tarefa de Retirada: BLOQUEADA" << endl;
-            ReleaseMutex(hMutexConsole);
+            CheckForError(ReleaseMutex(hMutexConsole));
         }
 
         if (!AguardarDesbloqueioOuTermino(hEventoBloqRetirada, eventoEncerramento)) {
@@ -356,9 +355,9 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
         if (estavaBloqueado) {
             estavaBloqueado = false;
 
-            WaitForSingleObject(hMutexConsole, INFINITE);
+            CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
             cout << "[STATUS] Tarefa de Retirada: DESBLOQUEADA" << endl;
-            ReleaseMutex(hMutexConsole);
+            CheckForError(ReleaseMutex(hMutexConsole));
         }
 
         return true;
@@ -374,6 +373,7 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
         //Verifica o bloqueio mesmo quando nao chegam mensagens.
         DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, 100);
+        CheckForError(resultado != WAIT_FAILED);
         if (resultado == WAIT_TIMEOUT) {
             continue;
         }
@@ -384,16 +384,16 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
         //Segunda verificacao, imediatamente apos adquirir uma mensagem.
         if (!aguardarPermissao()) {
-            ReleaseSemaphore(hSemOcupadas1, 1, nullptr);
+            CheckForError(ReleaseSemaphore(hSemOcupadas1, 1, nullptr));
             break;
         }
 
-        WaitForSingleObject(hMutexLista1, INFINITE);
+        CheckForError(WaitForSingleObject(hMutexLista1, INFINITE) != WAIT_FAILED);
 
         string msgRetirada = listaCircular1[pRetiradaIndividual];
         pRetiradaIndividual = (pRetiradaIndividual + 1) % TAM_LISTA_1;
 
-        ReleaseMutex(hMutexLista1);
+        CheckForError(ReleaseMutex(hMutexLista1));
 
         //Somente agora a posicao pode ser reutilizada.
         //
@@ -403,16 +403,16 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
             if (!DepositarNaLista2(msgRetirada, hEventoBloqRetirada, eventoEncerramento)) {
                 break;
             }
-            ReleaseSemaphore(hSemLivres1, 1, nullptr);
+            CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
         }
         else if (!msgRetirada.empty() && msgRetirada[0] == '2') {
             // Mensagem do PCP (31 chars) -> No proximo passo enviaremos via IPC para GestaoProducao
             // Por enquanto, exibe apenas as de tipo 2 aqui ate criarmos o Pipe/Mailslot:
-            WaitForSingleObject(hMutexConsole, INFINITE);
+            CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
             cout << "[PCP -> IPC Pendente] " << msgRetirada << endl;
-            ReleaseMutex(hMutexConsole);
+            CheckForError(ReleaseMutex(hMutexConsole));
 
-            ReleaseSemaphore(hSemLivres1, 1, nullptr);
+            CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
         }
     }
 
@@ -448,33 +448,30 @@ int main() {
         L"Local\\ELT127_Encerramento"
     );
 
-    if (eventoEncerramento == NULL) {
-        cout << "Erro ao criar evento de encerramento." << endl;
-        return 1;
-    }
+    CheckForError(eventoEncerramento);
     
     hEventoBloqSupervisorio = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    CheckForError(hEventoBloqSupervisorio);
     hEventoBloqPCP = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    CheckForError(hEventoBloqPCP);
     hEventoBloqRetirada = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    CheckForError(hEventoBloqRetirada);
     hEventoBloqExibicao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\ELT127_BloqExibicao");
+    CheckForError(hEventoBloqExibicao);
     hEventoBloqGestao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\ELT127_BloqGestao");
+    CheckForError(hEventoBloqGestao);
 
-    if (!eventoEncerramento || !hEventoBloqSupervisorio || !hEventoBloqPCP ||
-        !hEventoBloqRetirada || !hEventoBloqExibicao || !hEventoBloqGestao) {
-        cout << "Erro ao criar eventos de sincronizacao." << endl;
-        return 1;
-    }
 
     //Criacao dos objetos de sincronizacao da Lista Circular 
     hMutexLista1 = CreateMutexW(nullptr, FALSE, nullptr);
+    CheckForError(hMutexLista1);
     hSemLivres1 = CreateSemaphoreW(nullptr, TAM_LISTA_1, TAM_LISTA_1, nullptr);
+    CheckForError(hSemLivres1);
     hSemOcupadas1 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_1, nullptr);
+    CheckForError(hSemOcupadas1);
     hMutexConsole = CreateMutexW(nullptr, FALSE, nullptr);
+    CheckForError(hMutexConsole);
 
-    if (!hMutexLista1 || !hSemLivres1 || !hSemOcupadas1 || !hMutexConsole) {
-        cout << "Erro ao criar objetos de sincronizacao da lista." << endl;
-        return 1;
-    }
 
     // Criacao da Memoria Compartilhada e Sincronizacao da Lista Circular 2 
     hMapLista2 = CreateFileMappingW(
@@ -486,34 +483,29 @@ int main() {
         L"Local\\ELT127_MemLista2"
     );
 
-    if (hMapLista2 == NULL) {
-        cout << "Erro ao criar File Mapping da Lista 2: " << GetLastError() << endl;
-        return 1;
-    }
+    CheckForError(hMapLista2);
 
     lpLista2 = (ListaCircular2Compartilhada*)MapViewOfFile(hMapLista2,FILE_MAP_ALL_ACCESS,0, 0, sizeof(ListaCircular2Compartilhada));
 
-    if (lpLista2 == nullptr) {
-        cout << "Erro no MapViewOfFile da Lista 2: " << GetLastError() << endl;
-        return 1;
-    }
+    CheckForError(lpLista2);
 
     ZeroMemory(lpLista2, sizeof(ListaCircular2Compartilhada));//Inicializa a memoria compartilhada zerada
 
 
     hMutexLista2 = CreateMutexW(nullptr, FALSE, L"Local\\ELT127_MutexLista2");
+    CheckForError(hMutexLista2);
     hSemLivres2 = CreateSemaphoreW(nullptr, TAM_LISTA_2, TAM_LISTA_2, L"Local\\ELT127_SemLivres2");
+    CheckForError(hSemLivres2);
     hSemOcupadas2 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_2, L"Local\\ELT127_SemOcupadas2");
+    CheckForError(hSemOcupadas2);
 
-    if (!hMutexLista2 || !hSemLivres2 || !hSemOcupadas2) {
-        cout << "Erro ao criar sincronizadores da Lista 2." << endl;
-        return 1;
-    }
     // --------------------------------------------------------
     //CRIACAO DOS PROCESSOS
     // --------------------------------------------------------
     wchar_t bufferCaminho[MAX_PATH];
-    GetModuleFileNameW(nullptr, bufferCaminho, MAX_PATH);
+    DWORD tamanhoCaminho = GetModuleFileNameW(nullptr, bufferCaminho, MAX_PATH);
+    CheckForError(tamanhoCaminho);
+    CheckForError(tamanhoCaminho < MAX_PATH);
     wstring pastaExe(bufferCaminho);
     pastaExe = pastaExe.substr(0, pastaExe.find_last_of(L"\\/"));
 
@@ -534,10 +526,7 @@ int main() {
         &piExibicao
     );
 
-    if (!processoExibicao) {
-        cout << "Erro ao criar processo de exibicao: "
-            << GetLastError() << endl;
-    }
+    CheckForError(processoExibicao);
 
     // Processo de Gestao da Producao
     BOOL processoGestao = CreateProcessW(
@@ -553,10 +542,7 @@ int main() {
         &piGestao
     );
 
-    if (!processoGestao) {
-        cout << "Erro ao criar processo de gestao: "
-            << GetLastError() << endl;
-    }
+    CheckForError(processoGestao);
     // --------------------------------------------------------
     //CRIACAO DAS THREADS
     // --------------------------------------------------------
@@ -570,6 +556,8 @@ int main() {
         nullptr
     );
 
+    CheckForError(hThreadSupervisorio);
+
     HANDLE hThreadPCP = CreateThread(
         nullptr,
         0,
@@ -578,6 +566,8 @@ int main() {
         0,
         nullptr
     );
+
+    CheckForError(hThreadPCP);
 
     HANDLE hThreadRetirada = CreateThread(
         nullptr,
@@ -588,10 +578,7 @@ int main() {
         nullptr
     );
 
-    if (!hThreadSupervisorio || !hThreadPCP || !hThreadRetirada) {
-        cout << "Erro ao criar uma ou mais threads." << endl;
-        SetEvent(eventoEncerramento);
-    }
+    CheckForError(hThreadRetirada);
 
     // --------------------------------------------------------
     // LEITURA DO TECLADO
@@ -624,46 +611,61 @@ int main() {
 
         case 's': {
             DWORD estado = WaitForSingleObject(hEventoBloqSupervisorio, 0);
-            if (estado == WAIT_OBJECT_0)
-                ResetEvent(hEventoBloqSupervisorio); // Bloqueia
-            else if (estado == WAIT_TIMEOUT)
-                SetEvent(hEventoBloqSupervisorio);   // Desbloqueia
+            CheckForError(estado != WAIT_FAILED);
+            if (estado == WAIT_OBJECT_0) {
+                CheckForError(ResetEvent(hEventoBloqSupervisorio)); // Bloqueia
+            }
+            else if (estado == WAIT_TIMEOUT) {
+                CheckForError(SetEvent(hEventoBloqSupervisorio));   // Desbloqueia
+            }
             break;
         }
 
         case 'm': {
             DWORD estado = WaitForSingleObject(hEventoBloqPCP, 0);
-            if (estado == WAIT_OBJECT_0)
-                ResetEvent(hEventoBloqPCP);
-            else if (estado == WAIT_TIMEOUT)
-                SetEvent(hEventoBloqPCP);
+            CheckForError(estado != WAIT_FAILED);
+            if (estado == WAIT_OBJECT_0) {
+                CheckForError(ResetEvent(hEventoBloqPCP));
+            }
+            else if (estado == WAIT_TIMEOUT) {
+                CheckForError(SetEvent(hEventoBloqPCP));
+            }
             break;
         }
 
         case 'r': {
             DWORD estado = WaitForSingleObject(hEventoBloqRetirada, 0);
-            if (estado == WAIT_OBJECT_0)
-                ResetEvent(hEventoBloqRetirada);
-            else if (estado == WAIT_TIMEOUT)
-                SetEvent(hEventoBloqRetirada);
+            CheckForError(estado != WAIT_FAILED);
+            if (estado == WAIT_OBJECT_0) {
+                CheckForError(ResetEvent(hEventoBloqRetirada));
+            }
+            else if (estado == WAIT_TIMEOUT) {
+                CheckForError(SetEvent(hEventoBloqRetirada));
+            }
             break;
         }
 
         case 'p': {
             DWORD estado = WaitForSingleObject(hEventoBloqExibicao, 0);
-            if (estado == WAIT_OBJECT_0)
-                ResetEvent(hEventoBloqExibicao);
-            else if (estado == WAIT_TIMEOUT)
-                SetEvent(hEventoBloqExibicao);
+            CheckForError(estado != WAIT_FAILED);
+            if (estado == WAIT_OBJECT_0) {
+                CheckForError(ResetEvent(hEventoBloqExibicao));
+            }
+            else if (estado == WAIT_TIMEOUT) {
+                CheckForError(SetEvent(hEventoBloqExibicao));
+            }
             break;
         }
 
         case 'g': {
             DWORD estado = WaitForSingleObject(hEventoBloqGestao, 0);
-            if (estado == WAIT_OBJECT_0)
-                ResetEvent(hEventoBloqGestao);
-            else if (estado == WAIT_TIMEOUT)
-                SetEvent(hEventoBloqGestao);
+            CheckForError(estado != WAIT_FAILED);
+            if (estado == WAIT_OBJECT_0) {
+                CheckForError(ResetEvent(hEventoBloqGestao));
+            }
+            else if (estado == WAIT_TIMEOUT) {
+                CheckForError(SetEvent(hEventoBloqGestao));
+            }
             break;
         }
 
@@ -682,7 +684,7 @@ int main() {
     // ENCERRAMENTO DAS THREADS
     // --------------------------------------------------------
 
-    SetEvent(eventoEncerramento);
+    CheckForError(SetEvent(eventoEncerramento));
 
     HANDLE threads[] = {
         hThreadSupervisorio,
@@ -692,8 +694,8 @@ int main() {
 
     for (HANDLE thread : threads) {
         if (thread != NULL) {
-            WaitForSingleObject(thread, INFINITE);
-            CloseHandle(thread);
+            CheckForError(WaitForSingleObject(thread, INFINITE) != WAIT_FAILED);
+            CheckForError(CloseHandle(thread));
         }
     }
 
@@ -704,43 +706,39 @@ int main() {
     if (processoExibicao) {
         // Aguarda o filho responder ao evento de encerramento antes de fechar os handles.
         DWORD resultado = WaitForSingleObject(piExibicao.hProcess, INFINITE);
-        if (resultado == WAIT_FAILED) {
-            cout << "Erro ao aguardar processo de exibicao: " << GetLastError() << endl;
-        }
-        CloseHandle(piExibicao.hThread);
-        CloseHandle(piExibicao.hProcess);
+        CheckForError(resultado != WAIT_FAILED);
+        CheckForError(CloseHandle(piExibicao.hThread));
+        CheckForError(CloseHandle(piExibicao.hProcess));
     }
 
     if (processoGestao) {
         DWORD resultado = WaitForSingleObject(piGestao.hProcess, INFINITE);
-        if (resultado == WAIT_FAILED) {
-            cout << "Erro ao aguardar processo de gestao: " << GetLastError() << endl;
-        }
-        CloseHandle(piGestao.hThread);
-        CloseHandle(piGestao.hProcess);
+        CheckForError(resultado != WAIT_FAILED);
+        CheckForError(CloseHandle(piGestao.hThread));
+        CheckForError(CloseHandle(piGestao.hProcess));
     }
 
     // --------------------------------------------------------
     // 8. LIBERACAO DOS RECURSOS
     // --------------------------------------------------------
 
-    CloseHandle(eventoEncerramento);
-    CloseHandle(hEventoBloqSupervisorio);
-    CloseHandle(hEventoBloqPCP);
-    CloseHandle(hEventoBloqRetirada);
-    CloseHandle(hEventoBloqExibicao);
-    CloseHandle(hEventoBloqGestao);
+    CheckForError(CloseHandle(eventoEncerramento));
+    CheckForError(CloseHandle(hEventoBloqSupervisorio));
+    CheckForError(CloseHandle(hEventoBloqPCP));
+    CheckForError(CloseHandle(hEventoBloqRetirada));
+    CheckForError(CloseHandle(hEventoBloqExibicao));
+    CheckForError(CloseHandle(hEventoBloqGestao));
 
-    CloseHandle(hMutexLista1);
-    CloseHandle(hSemLivres1);
-    CloseHandle(hSemOcupadas1);
-    CloseHandle(hMutexConsole);
+    CheckForError(CloseHandle(hMutexLista1));
+    CheckForError(CloseHandle(hSemLivres1));
+    CheckForError(CloseHandle(hSemOcupadas1));
+    CheckForError(CloseHandle(hMutexConsole));
 
-    UnmapViewOfFile(lpLista2);
-    CloseHandle(hMapLista2);
-    CloseHandle(hMutexLista2);
-    CloseHandle(hSemLivres2);
-    CloseHandle(hSemOcupadas2);
+    CheckForError(UnmapViewOfFile(lpLista2));
+    CheckForError(CloseHandle(hMapLista2));
+    CheckForError(CloseHandle(hMutexLista2));
+    CheckForError(CloseHandle(hSemLivres2));
+    CheckForError(CloseHandle(hSemOcupadas2));
 
     cout << "\nProcesso principal encerrado." << endl;
 
