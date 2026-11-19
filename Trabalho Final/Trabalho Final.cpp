@@ -11,6 +11,17 @@ using namespace std;
 
 const int TAM_LISTA_1 = 100;
 string listaCircular1[TAM_LISTA_1];
+
+const int TAM_LISTA_2 = 200;
+const int TAM_MSG_PROCESSO = 51;
+
+struct ListaCircular2Compartilhada {
+    int pLivre2;
+    int pOcupado2;
+    char mensagens[TAM_LISTA_2][TAM_MSG_PROCESSO];
+};
+
+
 // Indices compartilhados
 int pLivre1 = 0;// Proxima posicao a reservar
 int pPublicacao1 = 0;// Proxima posicao a disponibilizar para retirada
@@ -23,6 +34,11 @@ HANDLE hSemLivres1 = NULL; //Conta espacos livres (inicia em 100)
 HANDLE hSemOcupadas1 = NULL; //Conta mensagens disponiveis (inicia em 0)
 HANDLE hMutexConsole = NULL; //Protege o uso do cout no console principal
 
+HANDLE hMapLista2 = NULL;     
+ListaCircular2Compartilhada* lpLista2 = nullptr; 
+HANDLE hMutexLista2 = NULL;
+HANDLE hSemLivres2 = NULL;
+HANDLE hSemOcupadas2 = NULL;
 
 HANDLE hEventoBloqSupervisorio = NULL;
 HANDLE hEventoBloqPCP = NULL;
@@ -157,6 +173,43 @@ bool DepositarNaLista1(
     return true;
 }
 
+//Função auxiliar de deposito de  mensagem de dados de processo na Lista Circular 2 
+bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE eventoEncerramento) {
+    DWORD resultado = WaitForSingleObject(hSemLivres2, 0);
+
+    if (resultado == WAIT_TIMEOUT) {
+        WaitForSingleObject(hMutexConsole, INFINITE);
+        cout << "[AVISO] Lista circular 2 cheia! Tarefa de Retirada aguardando posicao livre..." << endl;
+        ReleaseMutex(hMutexConsole);
+
+        HANDLE eventos[] = { eventoEncerramento, hSemLivres2 };
+        resultado = WaitForMultipleObjects(2, eventos, FALSE, INFINITE);
+        if (resultado != WAIT_OBJECT_0 + 1) {
+            return false; // ESC pressionado
+        }
+    }
+    else if (resultado != WAIT_OBJECT_0) {
+        return false;
+    }
+
+    if (!AguardarDesbloqueioOuTermino(hEventoBloqueio, eventoEncerramento)) {
+        ReleaseSemaphore(hSemLivres2, 1, nullptr);
+        return false;
+    }
+
+    // Escreve na memoria compartilhada protegida pelo Mutex
+    WaitForSingleObject(hMutexLista2, INFINITE);
+
+    strcpy_s(lpLista2->mensagens[lpLista2->pLivre2], TAM_MSG_PROCESSO, mensagem.c_str());
+    lpLista2->pLivre2 = (lpLista2->pLivre2 + 1) % TAM_LISTA_2;
+
+    ReleaseMutex(hMutexLista2);
+
+    //Avisa o processo ExibicaoProcesso que ha 1 nova mensagem disponivel
+    ReleaseSemaphore(hSemOcupadas2, 1, nullptr);
+    return true;
+}
+
 // ============================================================
 // THREADS
 // ============================================================
@@ -268,7 +321,7 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
             break; 
         }
     }
-
+  
     CloseHandle(hTimerPCP);
     return 0;
 }
@@ -343,11 +396,24 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
         ReleaseMutex(hMutexLista1);
 
         //Somente agora a posicao pode ser reutilizada.
-        ReleaseSemaphore(hSemLivres1, 1, nullptr);
+        //
 
-        WaitForSingleObject(hMutexConsole, INFINITE);
-        cout << msgRetirada << endl;
-        ReleaseMutex(hMutexConsole);
+        if (!msgRetirada.empty() && msgRetirada[0] == '1') {
+            // Mensagem de Dados de Processo (50 chars) -> Vai para a Lista Circular 2
+            if (!DepositarNaLista2(msgRetirada, hEventoBloqRetirada, eventoEncerramento)) {
+                break;
+            }
+            ReleaseSemaphore(hSemLivres1, 1, nullptr);
+        }
+        else if (!msgRetirada.empty() && msgRetirada[0] == '2') {
+            // Mensagem do PCP (31 chars) -> No proximo passo enviaremos via IPC para GestaoProducao
+            // Por enquanto, exibe apenas as de tipo 2 aqui ate criarmos o Pipe/Mailslot:
+            WaitForSingleObject(hMutexConsole, INFINITE);
+            cout << "[PCP -> IPC Pendente] " << msgRetirada << endl;
+            ReleaseMutex(hMutexConsole);
+
+            ReleaseSemaphore(hSemLivres1, 1, nullptr);
+        }
     }
 
     return 0;
@@ -410,6 +476,39 @@ int main() {
         return 1;
     }
 
+    // Criacao da Memoria Compartilhada e Sincronizacao da Lista Circular 2 
+    hMapLista2 = CreateFileMappingW(
+        INVALID_HANDLE_VALUE, 
+        nullptr,
+        PAGE_READWRITE,
+        0,
+        sizeof(ListaCircular2Compartilhada),
+        L"Local\\ELT127_MemLista2"
+    );
+
+    if (hMapLista2 == NULL) {
+        cout << "Erro ao criar File Mapping da Lista 2: " << GetLastError() << endl;
+        return 1;
+    }
+
+    lpLista2 = (ListaCircular2Compartilhada*)MapViewOfFile(hMapLista2,FILE_MAP_ALL_ACCESS,0, 0, sizeof(ListaCircular2Compartilhada));
+
+    if (lpLista2 == nullptr) {
+        cout << "Erro no MapViewOfFile da Lista 2: " << GetLastError() << endl;
+        return 1;
+    }
+
+    ZeroMemory(lpLista2, sizeof(ListaCircular2Compartilhada));//Inicializa a memoria compartilhada zerada
+
+
+    hMutexLista2 = CreateMutexW(nullptr, FALSE, L"Local\\ELT127_MutexLista2");
+    hSemLivres2 = CreateSemaphoreW(nullptr, TAM_LISTA_2, TAM_LISTA_2, L"Local\\ELT127_SemLivres2");
+    hSemOcupadas2 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_2, L"Local\\ELT127_SemOcupadas2");
+
+    if (!hMutexLista2 || !hSemLivres2 || !hSemOcupadas2) {
+        cout << "Erro ao criar sincronizadores da Lista 2." << endl;
+        return 1;
+    }
     // --------------------------------------------------------
     //CRIACAO DOS PROCESSOS
     // --------------------------------------------------------
@@ -636,6 +735,12 @@ int main() {
     CloseHandle(hSemLivres1);
     CloseHandle(hSemOcupadas1);
     CloseHandle(hMutexConsole);
+
+    UnmapViewOfFile(lpLista2);
+    CloseHandle(hMapLista2);
+    CloseHandle(hMutexLista2);
+    CloseHandle(hSemLivres2);
+    CloseHandle(hSemOcupadas2);
 
     cout << "\nProcesso principal encerrado." << endl;
 
