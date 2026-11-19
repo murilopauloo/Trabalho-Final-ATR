@@ -10,9 +10,9 @@ int main() {
     CheckForError(SetConsoleTitleW(L"Tela de Acompanhamento de Producao (Gestao)"));
 
     //Abre os eventos nomeados criados pelo Processo Principal
-    HANDLE hEventoEncerramento = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\ELT127_Encerramento");
+    HANDLE hEventoEncerramento = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\Encerramento");
     CheckForError(hEventoEncerramento);
-    HANDLE hEventoBloqueio = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\ELT127_BloqGestao");
+    HANDLE hEventoBloqueio = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\BloqGestao");
     CheckForError(hEventoBloqueio);
 
 

@@ -49,6 +49,9 @@ HANDLE hEventoBloqRetirada = NULL;
 HANDLE hEventoBloqExibicao = NULL;
 HANDLE hEventoBloqGestao = NULL;
 
+const wchar_t* MAILSLOT_EXIBICAO = L"\\\\.\\mailslot\\MailExibicao";
+const wchar_t* MAILSLOT_GESTAO = L"\\\\.\\mailslot\\MailGestao";
+
 // Aguarda permissao para executar ou encerramento, com prioridade para encerrar
 bool AguardarDesbloqueioOuTermino(HANDLE hEventoBloqueio, HANDLE hEventoEncerramento) {
     HANDLE eventos[] = { hEventoEncerramento, hEventoBloqueio };
@@ -213,9 +216,38 @@ bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE ev
 
     CheckForError(ReleaseMutex(hMutexLista2));
 
-    //Avisa o processo ExibicaoProcesso que ha 1 nova mensagem disponivel
+    //Avisa o processo ExibicaoProcesso quetem uma nova mensagem disponivel
     CheckForError(ReleaseSemaphore(hSemOcupadas2, 1, nullptr));
     return true;
+}
+
+// Envia uma string via Mailslot para um processo filho
+bool EnviarMailslot(const wchar_t* nomeMailslot, const string& mensagem) {
+    HANDLE hMail = CreateFileW(
+        nomeMailslot,
+        GENERIC_WRITE,
+        FILE_SHARE_READ, 
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+
+    if (hMail == INVALID_HANDLE_VALUE) {
+        return false; 
+    }
+
+    DWORD bytesEscritos = 0;
+    BOOL sucesso = WriteFile(
+        hMail,
+        mensagem.c_str(),
+        (DWORD)(mensagem.size() + 1),
+        &bytesEscritos,
+        nullptr
+    );
+
+    CloseHandle(hMail);
+    return (sucesso != FALSE);
 }
 
 // ============================================================
@@ -236,7 +268,6 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
     const LONGLONG nMultiplicadorParaMs = 10000;
     LARGE_INTEGER Preset;
 
-    //Waitable Timer de sincronizacao (reset automatico)
     HANDLE hTimerSup = CreateWaitableTimerW(nullptr, FALSE, nullptr);
     CheckForError(hTimerSup);
 
@@ -255,7 +286,7 @@ DWORD WINAPI LeituraSupervisorio(LPVOID parametro) {
             break; // ESC foi pressionado! Encerra imediatamente.
         }
 
-        // 2. Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
+        //Verifica se a tecla 's' bloqueou a tarefa ou se 'ESC' foi premido
         if (!AguardarDesbloqueioOuTermino(hEventoBloqSupervisorio, eventoEncerramento)) {
             break;
         }
@@ -282,13 +313,13 @@ DWORD WINAPI LeituraPCP(LPVOID parametro) {
     // Inicializa os numeros aleatorios
     srand((unsigned int)time(NULL) + 2);
 
-    int nseq = 1; // Comeca em 1
-    int pDepositoIndividual = -1; // Apontador local desta tarefa.
+    int nseq = 1; 
+    int pDepositoIndividual = -1;
 
     const LONGLONG nMultiplicadorParaMs = 10000;
     LARGE_INTEGER Preset;
 
-    //Waitable Timer de sincronizacao (reset automatico)
+    
     HANDLE hTimerPCP = CreateWaitableTimerW(nullptr, FALSE, nullptr);
     CheckForError(hTimerPCP);
 
@@ -395,9 +426,6 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
         CheckForError(ReleaseMutex(hMutexLista1));
 
-        //Somente agora a posicao pode ser reutilizada.
-        //
-
         if (!msgRetirada.empty() && msgRetirada[0] == '1') {
             // Mensagem de Dados de Processo (50 chars) -> Vai para a Lista Circular 2
             if (!DepositarNaLista2(msgRetirada, hEventoBloqRetirada, eventoEncerramento)) {
@@ -408,10 +436,11 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
         else if (!msgRetirada.empty() && msgRetirada[0] == '2') {
             // Mensagem do PCP (31 chars) -> No proximo passo enviaremos via IPC para GestaoProducao
             // Por enquanto, exibe apenas as de tipo 2 aqui ate criarmos o Pipe/Mailslot:
-            CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
-            cout << "[PCP -> IPC Pendente] " << msgRetirada << endl;
-            CheckForError(ReleaseMutex(hMutexConsole));
-
+            if (!EnviarMailslot(MAILSLOT_GESTAO, msgRetirada)) {
+                CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
+                cout << "[AVISO] Nao foi possivel enviar mensagem PCP para GestaoProducao." << endl;
+                CheckForError(ReleaseMutex(hMutexConsole));
+            }
             CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
         }
     }
@@ -445,7 +474,7 @@ int main() {
         nullptr,
         TRUE,
         FALSE,
-        L"Local\\ELT127_Encerramento"
+        L"Local\\Encerramento"
     );
 
     CheckForError(eventoEncerramento);
@@ -456,9 +485,9 @@ int main() {
     CheckForError(hEventoBloqPCP);
     hEventoBloqRetirada = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     CheckForError(hEventoBloqRetirada);
-    hEventoBloqExibicao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\ELT127_BloqExibicao");
+    hEventoBloqExibicao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\BloqExibicao");
     CheckForError(hEventoBloqExibicao);
-    hEventoBloqGestao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\ELT127_BloqGestao");
+    hEventoBloqGestao = CreateEventW(nullptr, TRUE, TRUE, L"Local\\BloqGestao");
     CheckForError(hEventoBloqGestao);
 
 
@@ -480,7 +509,7 @@ int main() {
         PAGE_READWRITE,
         0,
         sizeof(ListaCircular2Compartilhada),
-        L"Local\\ELT127_MemLista2"
+        L"Local\\MemLista2"
     );
 
     CheckForError(hMapLista2);
@@ -492,11 +521,11 @@ int main() {
     ZeroMemory(lpLista2, sizeof(ListaCircular2Compartilhada));//Inicializa a memoria compartilhada zerada
 
 
-    hMutexLista2 = CreateMutexW(nullptr, FALSE, L"Local\\ELT127_MutexLista2");
+    hMutexLista2 = CreateMutexW(nullptr, FALSE, L"Local\\MutexLista2");
     CheckForError(hMutexLista2);
-    hSemLivres2 = CreateSemaphoreW(nullptr, TAM_LISTA_2, TAM_LISTA_2, L"Local\\ELT127_SemLivres2");
+    hSemLivres2 = CreateSemaphoreW(nullptr, TAM_LISTA_2, TAM_LISTA_2, L"Local\\SemLivres2");
     CheckForError(hSemLivres2);
-    hSemOcupadas2 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_2, L"Local\\ELT127_SemOcupadas2");
+    hSemOcupadas2 = CreateSemaphoreW(nullptr, 0, TAM_LISTA_2, L"Local\\SemOcupadas2");
     CheckForError(hSemOcupadas2);
 
     // --------------------------------------------------------
@@ -613,10 +642,10 @@ int main() {
             DWORD estado = WaitForSingleObject(hEventoBloqSupervisorio, 0);
             CheckForError(estado != WAIT_FAILED);
             if (estado == WAIT_OBJECT_0) {
-                CheckForError(ResetEvent(hEventoBloqSupervisorio)); // Bloqueia
+                CheckForError(ResetEvent(hEventoBloqSupervisorio)); 
             }
             else if (estado == WAIT_TIMEOUT) {
-                CheckForError(SetEvent(hEventoBloqSupervisorio));   // Desbloqueia
+                CheckForError(SetEvent(hEventoBloqSupervisorio));  
             }
             break;
         }
@@ -670,8 +699,18 @@ int main() {
         }
 
         case '1':
+            if (EnviarMailslot(MAILSLOT_EXIBICAO, "LIMPAR")) {
+                WaitForSingleObject(hMutexConsole, INFINITE);
+                cout << "[TECLADO] Comando de limpeza enviado para Exibicao de Processo." << endl;
+                ReleaseMutex(hMutexConsole);
+            }
+            break;
         case '2':
-            cout << "[Aviso] Sinal de limpeza enviado\n";
+            if (EnviarMailslot(MAILSLOT_GESTAO, "LIMPAR")) {
+                WaitForSingleObject(hMutexConsole, INFINITE);
+                cout << "[TECLADO] Comando de limpeza enviado para Gestao da Producao." << endl;
+                ReleaseMutex(hMutexConsole);
+            }
             break;
 
         case 27: // ESC

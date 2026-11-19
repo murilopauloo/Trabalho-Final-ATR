@@ -39,19 +39,19 @@ int main() {
     CheckForError(SetConsoleTitleW(L"Tela de Exibicao de Dados de Processo"));
 
     //Abre os eventos nomeados criados pelo Processo Principal
-    HANDLE hEventoEncerramento = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\ELT127_Encerramento");
+    HANDLE hEventoEncerramento = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\Encerramento");
     CheckForError(hEventoEncerramento);
-    HANDLE hEventoBloqueio = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\ELT127_BloqExibicao");
+    HANDLE hEventoBloqueio = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\BloqExibicao");
     CheckForError(hEventoBloqueio);
 
     // 2. Abre a Memoria Compartilhada e os objetos de sincronizacao da Lista Circular 2
-    HANDLE hMapLista2 = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\ELT127_MemLista2");
+    HANDLE hMapLista2 = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\MemLista2");
     CheckForError(hMapLista2);
-    HANDLE hMutexLista2 = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\ELT127_MutexLista2");
+    HANDLE hMutexLista2 = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\MutexLista2");
     CheckForError(hMutexLista2);
-    HANDLE hSemLivres2 = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, L"Local\\ELT127_SemLivres2");
+    HANDLE hSemLivres2 = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, L"Local\\SemLivres2");
     CheckForError(hSemLivres2);
-    HANDLE hSemOcupadas2 = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, L"Local\\ELT127_SemOcupadas2");
+    HANDLE hSemOcupadas2 = OpenSemaphoreW(SEMAPHORE_MODIFY_STATE | SYNCHRONIZE, FALSE, L"Local\\SemOcupadas2");
     CheckForError(hSemOcupadas2);
 
 
