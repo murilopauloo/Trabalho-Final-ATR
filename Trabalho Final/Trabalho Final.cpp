@@ -7,8 +7,9 @@
 #include <cstdlib>
 #include <ctime>
 
-#define _CHECKERROR 1 // Ativa a checagem de erros no padrao do exemplo do professor.
+#define _CHECKERROR 1
 #include "../CheckForError.h"
+#include "../Comunicacao.h"
 
 using namespace std;
 
@@ -48,9 +49,6 @@ HANDLE hEventoBloqPCP = NULL;
 HANDLE hEventoBloqRetirada = NULL;
 HANDLE hEventoBloqExibicao = NULL;
 HANDLE hEventoBloqGestao = NULL;
-
-const wchar_t* MAILSLOT_EXIBICAO = L"\\\\.\\mailslot\\MailExibicao";
-const wchar_t* MAILSLOT_GESTAO = L"\\\\.\\mailslot\\MailGestao";
 
 // Aguarda permissao para executar ou encerramento, com prioridade para encerrar
 bool AguardarDesbloqueioOuTermino(HANDLE hEventoBloqueio, HANDLE hEventoEncerramento) {
@@ -246,8 +244,125 @@ bool EnviarMailslot(const wchar_t* nomeMailslot, const string& mensagem) {
         nullptr
     );
 
-    CloseHandle(hMail);
-    return (sucesso != FALSE);
+    DWORD erro = sucesso ? ERROR_SUCCESS : GetLastError();
+    CheckForError(CloseHandle(hMail));
+    if (!sucesso) {
+        SetLastError(erro);
+        return false;
+    }
+    if (bytesEscritos != mensagem.size() + 1) {
+        SetLastError(ERROR_WRITE_FAULT);
+        return false;
+    }
+    return true;
+}
+
+void RegistrarMensagemConsole(const string& mensagem) {
+    CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
+    cout << mensagem << endl;
+    CheckForError(ReleaseMutex(hMutexConsole));
+}
+
+// Nao inicia o teclado e os produtores antes de os filhos criarem seus canais.
+void AguardarMailslotPronto(const wchar_t* nome, HANDLE processo, HANDLE eventoEncerramento) {
+    const ULONGLONG inicio = GetTickCount64();
+    while (GetTickCount64() - inicio < 10000) {
+        HANDLE canal = CreateFileW(nome, GENERIC_WRITE, FILE_SHARE_READ,
+            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (canal != INVALID_HANDLE_VALUE) {
+            CheckForError(CloseHandle(canal));
+            return;
+        }
+        HANDLE eventos[] = { eventoEncerramento, processo };
+        DWORD resultado = WaitForMultipleObjects(2, eventos, FALSE, 100);
+        CheckForError(resultado != WAIT_FAILED);
+        if (resultado != WAIT_TIMEOUT) {
+            CheckForError(SetEvent(eventoEncerramento));
+            SetLastError(ERROR_PROCESS_ABORTED);
+            CheckForError(FALSE);
+            return;
+        }
+    }
+    CheckForError(SetEvent(eventoEncerramento));
+    SetLastError(ERROR_TIMEOUT);
+    CheckForError(FALSE);
+}
+
+void AlternarBloqueio(HANDLE evento, const char* nomeTarefa) {
+    DWORD estado = WaitForSingleObject(evento, 0);
+    CheckForError(estado != WAIT_FAILED);
+    if (estado == WAIT_OBJECT_0) {
+        CheckForError(ResetEvent(evento));
+        RegistrarMensagemConsole(string("[TECLADO] Bloqueio solicitado: ") + nomeTarefa + ".");
+    }
+    else if (estado == WAIT_TIMEOUT) {
+        CheckForError(SetEvent(evento));
+        RegistrarMensagemConsole(string("[TECLADO] Desbloqueio solicitado: ") + nomeTarefa + ".");
+    }
+}
+
+void SolicitarLimpeza(const wchar_t* mailslot, const char* destino) {
+    if (EnviarMailslot(mailslot, "LIMPAR")) {
+        RegistrarMensagemConsole(string("[TECLADO] Comando de limpeza enviado para ") + destino + ".");
+    }
+    else {
+        DWORD erro = GetLastError();
+        RegistrarMensagemConsole(string("[ERRO] Nao foi possivel enviar limpeza para ")
+            + destino + ". Codigo: " + to_string(erro) + ".");
+    }
+}
+
+bool TratarComandoTeclado(int tecla, HANDLE eventoEncerramento) {
+    switch (tecla) {
+    case 's':
+        AlternarBloqueio(hEventoBloqSupervisorio, "Leitura do Supervisorio");
+        break;
+    case 'm':
+        AlternarBloqueio(hEventoBloqPCP, "Leitura do PCP");
+        break;
+    case 'r':
+        AlternarBloqueio(hEventoBloqRetirada, "Retirada de Mensagens");
+        break;
+    case 'p':
+        AlternarBloqueio(hEventoBloqExibicao, "Exibicao de Processo");
+        break;
+    case 'g':
+        AlternarBloqueio(hEventoBloqGestao, "Gestao da Producao");
+        break;
+    case '1':
+        SolicitarLimpeza(MAILSLOT_EXIBICAO, "Exibicao de Processo");
+        break;
+    case '2':
+        SolicitarLimpeza(MAILSLOT_GESTAO, "Gestao da Producao");
+        break;
+    case 27:
+        RegistrarMensagemConsole("[TECLADO] Encerramento solicitado.");
+        CheckForError(SetEvent(eventoEncerramento));
+        return false;
+    }
+    return true;
+}
+
+// Preserva a mensagem enquanto a Gestao inicializa ou esta indisponivel.
+bool EncaminharMensagemPCP(const string& mensagem, HANDLE eventoEncerramento) {
+    bool avisou = false;
+    while (AguardarDesbloqueioOuTermino(hEventoBloqRetirada, eventoEncerramento)) {
+        if (EnviarMailslot(MAILSLOT_GESTAO, mensagem)) {
+            return true;
+        }
+        DWORD erro = GetLastError();
+        if (!avisou) {
+            RegistrarMensagemConsole("[AVISO] Aguardando canal da Gestao para enviar PCP. Codigo: "
+                + to_string(erro) + ".");
+            avisou = true;
+        }
+        DWORD resultado = WaitForSingleObject(eventoEncerramento, 100);
+        CheckForError(resultado != WAIT_FAILED);
+        if (resultado == WAIT_OBJECT_0) {
+            return false;
+        }
+    }
+    return false;
 }
 
 // ============================================================
@@ -426,22 +541,22 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
 
         CheckForError(ReleaseMutex(hMutexLista1));
 
+        // A mensagem ja esta copiada: libera a vaga mesmo durante espera no IPC.
+        CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
+
         if (!msgRetirada.empty() && msgRetirada[0] == '1') {
             // Mensagem de Dados de Processo (50 chars) -> Vai para a Lista Circular 2
             if (!DepositarNaLista2(msgRetirada, hEventoBloqRetirada, eventoEncerramento)) {
                 break;
             }
-            CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
         }
         else if (!msgRetirada.empty() && msgRetirada[0] == '2') {
-            // Mensagem do PCP (31 chars) -> No proximo passo enviaremos via IPC para GestaoProducao
-            // Por enquanto, exibe apenas as de tipo 2 aqui ate criarmos o Pipe/Mailslot:
-            if (!EnviarMailslot(MAILSLOT_GESTAO, msgRetirada)) {
-                CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
-                cout << "[AVISO] Nao foi possivel enviar mensagem PCP para GestaoProducao." << endl;
-                CheckForError(ReleaseMutex(hMutexConsole));
+            if (!EncaminharMensagemPCP(msgRetirada, eventoEncerramento)) {
+                break;
             }
-            CheckForError(ReleaseSemaphore(hSemLivres1, 1, nullptr));
+        }
+        else {
+            RegistrarMensagemConsole("[AVISO] Mensagem de tipo desconhecido na Lista 1: " + msgRetirada);
         }
     }
 
@@ -572,6 +687,8 @@ int main() {
     );
 
     CheckForError(processoGestao);
+    AguardarMailslotPronto(MAILSLOT_EXIBICAO, piExibicao.hProcess, eventoEncerramento);
+    AguardarMailslotPronto(MAILSLOT_GESTAO, piGestao.hProcess, eventoEncerramento);
     // --------------------------------------------------------
     //CRIACAO DAS THREADS
     // --------------------------------------------------------
@@ -613,6 +730,7 @@ int main() {
     // LEITURA DO TECLADO
     // --------------------------------------------------------
 
+    CheckForError(WaitForSingleObject(hMutexConsole, INFINITE) != WAIT_FAILED);
     cout << "______________________________________" << endl;
     cout << " SISTEMA DE MONITORAMENTO INDUSTRIAL " << endl;
     cout << "______________________________________" << endl;
@@ -626,6 +744,8 @@ int main() {
     cout << "1 - Limpar console de processo" << endl;
     cout << "2 - Limpar console de gestao" << endl;
     cout << "ESC - Encerrar aplicacao" << endl;
+    cout << "\n[STATUS] Todas as tarefas iniciadas DESBLOQUEADAS." << endl;
+    CheckForError(ReleaseMutex(hMutexConsole));
 
     bool executando = true;
 
@@ -635,88 +755,11 @@ int main() {
         hThreadRetirada) {
 
         int tecla = _getch();
-
-        switch (tecla) {
-
-        case 's': {
-            DWORD estado = WaitForSingleObject(hEventoBloqSupervisorio, 0);
-            CheckForError(estado != WAIT_FAILED);
-            if (estado == WAIT_OBJECT_0) {
-                CheckForError(ResetEvent(hEventoBloqSupervisorio)); 
-            }
-            else if (estado == WAIT_TIMEOUT) {
-                CheckForError(SetEvent(hEventoBloqSupervisorio));  
-            }
-            break;
+        if (tecla == 0 || tecla == 224) {
+            _getch(); // Descarta o segundo codigo das teclas estendidas.
+            continue;
         }
-
-        case 'm': {
-            DWORD estado = WaitForSingleObject(hEventoBloqPCP, 0);
-            CheckForError(estado != WAIT_FAILED);
-            if (estado == WAIT_OBJECT_0) {
-                CheckForError(ResetEvent(hEventoBloqPCP));
-            }
-            else if (estado == WAIT_TIMEOUT) {
-                CheckForError(SetEvent(hEventoBloqPCP));
-            }
-            break;
-        }
-
-        case 'r': {
-            DWORD estado = WaitForSingleObject(hEventoBloqRetirada, 0);
-            CheckForError(estado != WAIT_FAILED);
-            if (estado == WAIT_OBJECT_0) {
-                CheckForError(ResetEvent(hEventoBloqRetirada));
-            }
-            else if (estado == WAIT_TIMEOUT) {
-                CheckForError(SetEvent(hEventoBloqRetirada));
-            }
-            break;
-        }
-
-        case 'p': {
-            DWORD estado = WaitForSingleObject(hEventoBloqExibicao, 0);
-            CheckForError(estado != WAIT_FAILED);
-            if (estado == WAIT_OBJECT_0) {
-                CheckForError(ResetEvent(hEventoBloqExibicao));
-            }
-            else if (estado == WAIT_TIMEOUT) {
-                CheckForError(SetEvent(hEventoBloqExibicao));
-            }
-            break;
-        }
-
-        case 'g': {
-            DWORD estado = WaitForSingleObject(hEventoBloqGestao, 0);
-            CheckForError(estado != WAIT_FAILED);
-            if (estado == WAIT_OBJECT_0) {
-                CheckForError(ResetEvent(hEventoBloqGestao));
-            }
-            else if (estado == WAIT_TIMEOUT) {
-                CheckForError(SetEvent(hEventoBloqGestao));
-            }
-            break;
-        }
-
-        case '1':
-            if (EnviarMailslot(MAILSLOT_EXIBICAO, "LIMPAR")) {
-                WaitForSingleObject(hMutexConsole, INFINITE);
-                cout << "[TECLADO] Comando de limpeza enviado para Exibicao de Processo." << endl;
-                ReleaseMutex(hMutexConsole);
-            }
-            break;
-        case '2':
-            if (EnviarMailslot(MAILSLOT_GESTAO, "LIMPAR")) {
-                WaitForSingleObject(hMutexConsole, INFINITE);
-                cout << "[TECLADO] Comando de limpeza enviado para Gestao da Producao." << endl;
-                ReleaseMutex(hMutexConsole);
-            }
-            break;
-
-        case 27: // ESC
-            executando = false;
-            break;
-        }
+        executando = TratarComandoTeclado(tecla, eventoEncerramento);
     }
 
     // --------------------------------------------------------

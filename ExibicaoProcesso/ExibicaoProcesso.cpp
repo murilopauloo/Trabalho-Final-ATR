@@ -4,6 +4,7 @@
 
 #define _CHECKERROR 1 // Ativa a checagem de erros no padrao do exemplo do professor.
 #include "../CheckForError.h"
+#include "../Comunicacao.h"
 
 using namespace std;
 
@@ -16,7 +17,15 @@ struct ListaCircular2Compartilhada {
     char mensagens[TAM_LISTA_2][TAM_MSG_PROCESSO];
 };
 
-// Desmembra "1/NNNNN/VOL/PRES/TZ1/TZ2/TZ3/HH:MM:SS.NNN" e imprime no formato exigido
+void ExibirCabecalho(bool bloqueada) {
+    cout << "_________________________________________________" << endl;
+    cout << "   TAREFA DE EXIBICAO DE PROCESSO" << endl;
+    cout << "_________________________________________________" << endl;
+    cout << "Tarefa de Exibicao de Processo: "
+         << (bloqueada ? "BLOQUEADA" : "DESBLOQUEADA") << endl;
+}
+
+// Desmembra "1/NNNNN/VOL/PRES/TZ1/TZ2/TZ3/HH:MM:SS.NNN" e imprime no formato exigido.
 void ExibirMensagemFormatada(const string& msg) {
     stringstream ss(msg);
     string tipo, nseq, vol, pres, tz1, tz2, tz3, hora;
@@ -43,6 +52,7 @@ int main() {
     CheckForError(hEventoEncerramento);
     HANDLE hEventoBloqueio = OpenEventW(SYNCHRONIZE, FALSE, L"Local\\BloqExibicao");
     CheckForError(hEventoBloqueio);
+    HANDLE hMailslot = CriarMailslotEntrada(MAILSLOT_EXIBICAO);
 
     // 2. Abre a Memoria Compartilhada e os objetos de sincronizacao da Lista Circular 2
     HANDLE hMapLista2 = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\MemLista2");
@@ -64,10 +74,7 @@ int main() {
 
     CheckForError(lpLista2);
 
-    cout << "_________________________________________________" << endl;
-    cout << "   TAREFA DE EXIBICAO DE PROCESSO      " << endl;
-    cout << "_________________________________________________" << endl;
-    cout << "Tarefa iniciada: DESBLOQUEADA" << endl;
+    ExibirCabecalho(false);
 
     bool estavaBloqueado = false;
 
@@ -94,6 +101,19 @@ int main() {
             }
         }
 
+        // Comandos de tela continuam sendo atendidos mesmo com a tarefa bloqueada.
+        string comando;
+        for (int i = 0; i < 64 && LerMensagemMailslot(hMailslot, comando); ++i) {
+            if (comando == "LIMPAR") {
+                LimparConsole();
+                ExibirCabecalho(estavaBloqueado);
+                cout << "[CONSOLE] Tela limpa." << endl;
+            }
+            else {
+                cout << "[AVISO] Comando desconhecido: " << comando << endl;
+            }
+        }
+
         if (estavaBloqueado) {
             HANDLE evBloq[2] = { hEventoEncerramento, hEventoBloqueio };
             DWORD resultadoBloqueio = WaitForMultipleObjects(2, evBloq, FALSE, 100);
@@ -116,6 +136,16 @@ int main() {
             break;
         }
 
+        // O bloqueio pode ter sido solicitado durante a espera por mensagens.
+        encerramento = WaitForSingleObject(hEventoEncerramento, 0);
+        CheckForError(encerramento != WAIT_FAILED);
+        statusBloq = WaitForSingleObject(hEventoBloqueio, 0);
+        CheckForError(statusBloq != WAIT_FAILED);
+        if (encerramento == WAIT_OBJECT_0 || statusBloq == WAIT_TIMEOUT) {
+            CheckForError(ReleaseSemaphore(hSemOcupadas2, 1, nullptr));
+            continue;
+        }
+
         // Retira mensagem da Lista Circular 2 sob exclusao mutua
         CheckForError(WaitForSingleObject(hMutexLista2, INFINITE) != WAIT_FAILED);
         string msgLida(lpLista2->mensagens[lpLista2->pOcupado2]);
@@ -131,6 +161,7 @@ int main() {
 
     cout << "\nEncerrando Tarefa de Exibicao de Processo..." << endl;
 
+    CheckForError(CloseHandle(hMailslot));
     CheckForError(UnmapViewOfFile(lpLista2));
     CheckForError(CloseHandle(hSemOcupadas2));
     CheckForError(CloseHandle(hSemLivres2));
