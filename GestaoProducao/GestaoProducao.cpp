@@ -27,8 +27,9 @@ void ExibirMensagemPCP(const string& mensagem) {
         cout << "[AVISO] Mensagem PCP invalida: " << mensagem << endl;
         return;
     }
-    cout << "NSEQ: " << nseq << " INICIO: " << inicio
-         << " DURACAO: " << duracao << " min OP: " << ordem << endl;
+    // Ordem dos campos e rotulos conforme o formato de exibicao do enunciado.
+    cout << "NSEQ: " << nseq << " OP: " << ordem
+         << " HORA DE INICIO: " << inicio << " DURACAO: " << duracao << endl;
 }
 
 int main() {

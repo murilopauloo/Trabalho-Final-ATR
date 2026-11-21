@@ -145,6 +145,16 @@
     <ClInclude Include="..\CheckForError.h" />
     <ClInclude Include="..\Comunicacao.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\ExibicaoProcesso\ExibicaoProcesso.vcxproj">
+      <Project>{6273733d-403a-43cb-8fe4-c945f921dbc8}</Project>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+    <ProjectReference Include="..\GestaoProducao\GestaoProducao.vcxproj">
+      <Project>{3b148ab3-0185-411a-8151-962b1aa30a96}</Project>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
