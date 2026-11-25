@@ -2,7 +2,7 @@
 #include <iostream>
 #include <sstream> 
 
-#define _CHECKERROR 1 // Ativa a checagem de erros no padrao do exemplo do professor.
+#define _CHECKERROR 1 
 #include "../CheckForError.h"
 #include "../Comunicacao.h"
 
@@ -30,7 +30,7 @@ void ExibirMensagemFormatada(const string& msg) {
     stringstream ss(msg);
     string tipo, nseq, vol, pres, tz1, tz2, tz3, hora;
 
-    // Corta a string automaticamente a cada '/'
+    
     getline(ss, tipo, '/');
     getline(ss, nseq, '/');
     getline(ss, vol, '/');
@@ -54,7 +54,7 @@ int main() {
     CheckForError(hEventoBloqueio);
     HANDLE hMailslot = CriarMailslotEntrada(MAILSLOT_EXIBICAO);
 
-    // 2. Abre a Memoria Compartilhada e os objetos de sincronizacao da Lista Circular 2
+    //Abre a Memoria Compartilhada e os objetos de sincronizacao da Lista Circular 2
     HANDLE hMapLista2 = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, L"Local\\MemLista2");
     CheckForError(hMapLista2);
     HANDLE hMutexLista2 = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\MutexLista2");
@@ -155,7 +155,7 @@ int main() {
         // Devolve 1 vaga livre para a Lista Circular 2
         CheckForError(ReleaseSemaphore(hSemLivres2, 1, nullptr));
 
-        // Formata e exibe na tela exclusiva
+       
         ExibirMensagemFormatada(msgLida);
     }
 

@@ -224,7 +224,7 @@ bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE ev
             CheckForError(resultado != WAIT_FAILED);
         } while (resultado == WAIT_TIMEOUT);
         if (resultado != WAIT_OBJECT_0 + 1) {
-            return false; // ESC pressionado
+            return false; 
         }
     }
     else if (resultado != WAIT_OBJECT_0) {
@@ -236,7 +236,7 @@ bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE ev
         return false;
     }
 
-    // Escreve na memoria compartilhada protegida pelo Mutex
+    //Escreve na memoria compartilhada protegida pelo Mutex
     CheckForError(WaitForSingleObject(hMutexLista2, INFINITE) != WAIT_FAILED);
 
     strcpy_s(lpLista2->mensagens[lpLista2->pLivre2], TAM_MSG_PROCESSO, mensagem.c_str());
@@ -249,7 +249,7 @@ bool DepositarNaLista2(const string& mensagem, HANDLE hEventoBloqueio, HANDLE ev
     return true;
 }
 
-// Envia uma string via Mailslot para um processo filho
+//Envia uma string via Mailslot para um processo filho
 bool EnviarMailslot(const wchar_t* nomeMailslot, const string& mensagem) {
     HANDLE hMail = CreateFileW(
         nomeMailslot,
@@ -531,7 +531,7 @@ DWORD WINAPI RetiradaMensagens(LPVOID parametro) {
         }
 
         if (resultado != WAIT_OBJECT_0 + 1) {
-            break; //Encerramento solicitado ou falha na espera.
+            break; 
         }
 
         //Segunda verificacao, imediatamente apos adquirir uma mensagem.

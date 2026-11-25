@@ -4,7 +4,7 @@
 #include <sstream>
 #include <string>
 
-#define _CHECKERROR 1 // Ativa a checagem de erros no padrao do exemplo do professor.
+#define _CHECKERROR 1
 #include "../CheckForError.h"
 #include "../Comunicacao.h"
 
@@ -27,7 +27,7 @@ void ExibirMensagemPCP(const string& mensagem) {
         cout << "[AVISO] Mensagem PCP invalida: " << mensagem << endl;
         return;
     }
-    // Ordem dos campos e rotulos conforme o formato de exibicao do enunciado.
+    //Ordem dos campos e rotulos conforme o formato de exibicao
     cout << "NSEQ: " << nseq << " OP: " << ordem
          << " HORA DE INICIO: " << inicio << " DURACAO: " << duracao << endl;
 }
